@@ -1,239 +1,344 @@
-import { getStore } from "@edgeone/pages-blob";
+import { CORS_HEADERS, SUCCESS_RESPONSE, ERROR_RESPONSE, UNAUTHORIZED_RESPONSE } from '../_shared.js';
 
-const CORS_HEADERS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization",
-};
-
-function jsonResponse(data, status = 200) {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: { "Content-Type": "application/json", ...CORS_HEADERS },
-  });
+function getStore(bucketName = 'notepro') {
+  return __STATIC_CONTENT.bucket(bucketName);
 }
 
-async function updateTags(store, oldTag, newTag) {
-  const tags = (await store.get("tags/index.json", { type: "json", consistency: "strong" })).catch(() => []) || [];
-
-  if (oldTag) {
-    const oldEntry = tags.find((t) => t.name === oldTag);
-    if (oldEntry) {
-      oldEntry.count -= 1;
-      if (oldEntry.count <= 0) {
-        const idx = tags.indexOf(oldEntry);
-        tags.splice(idx, 1);
-      }
-    }
-  }
-
-  if (newTag) {
-    const newEntry = tags.find((t) => t.name === newTag);
-    if (newEntry) {
-      newEntry.count += 1;
-    } else {
-      tags.push({ name: newTag, count: 1, hidden: false, visitCount: 0 });
-    }
-  }
-
-  await store.setJSON("tags/index.json", tags);
-}
-
-async function updateCalendar(store, dateStr, delta) {
-  const match = dateStr.match(/^(\d{4})-(\d{2})/);
-  if (!match) return;
-  const [, year, month] = match;
-  const key = `calendar/${year}${month}.json`;
-  const cal = (await store.get(key, { type: "json", consistency: "strong" })).catch(() => {}) || {};
-  const day = parseInt(dateStr.split("-")[2], 10);
-  cal[day] = (cal[day] || 0) + delta;
-  if (cal[day] <= 0) delete cal[day];
-  await store.setJSON(key, cal);
-}
-
-async function handleGet(request, store) {
-  const url = new URL(request.url);
-  const id = url.searchParams.get("id");
-
-  if (id) {
-    const posts = (await store.get("posts/index.json", { type: "json", consistency: "strong" })).catch(() => []) || [];
-    const post = posts.find((p) => p.id === id);
-    if (!post) return jsonResponse({ error: "Post not found" }, 404);
-    return jsonResponse({ post });
-  }
-
-  const posts = (await store.get("posts/index.json", { type: "json" })).catch(() => []) || [];
-  let filtered = posts.filter((p) => !p.hidden);
-
-  const tag = url.searchParams.get("tag");
-  if (tag) {
-    filtered = filtered.filter((p) => p.tag === tag);
-  }
-
-  const search = url.searchParams.get("search");
-  if (search) {
-    const lower = search.toLowerCase();
-    filtered = filtered.filter(
-      (p) =>
-        (p.title && p.title.toLowerCase().includes(lower)) ||
-        (p.content && p.content.toLowerCase().includes(lower))
-    );
-  }
-
-  const date = url.searchParams.get("date");
-  if (date) {
-    filtered = filtered.filter((p) => p.date && p.date.startsWith(date));
-  }
-
-  const pinned = filtered.filter((p) => p.pin);
-  const unpinned = filtered.filter((p) => !p.pin);
-  const sorted = [...pinned, ...unpinned].sort(
-    (a, b) => new Date(b.date) - new Date(a.date)
+async function checkAuth(request, config) {
+  const cookieHeader = request.headers.get('cookie') || '';
+  const cookies = Object.fromEntries(
+    cookieHeader.split(';').map(c => c.trim().split('='))
   );
 
-  const page = parseInt(url.searchParams.get("page") || "1", 10);
-  const pageSize = parseInt(url.searchParams.get("pageSize") || "10", 10);
-  const start = (page - 1) * pageSize;
-  const paginated = sorted.slice(start, start + pageSize);
-
-  return jsonResponse({
-    posts: paginated,
-    total: sorted.length,
-    page,
-    pageSize,
-    totalPages: Math.ceil(sorted.length / pageSize),
-  });
-}
-
-async function handlePost(request, store) {
-  const body = await request.json().catch(() => ({}));
-  const { title, content, tag, pin, hidden, weather, location, media, archive } = body;
-
-  if (!title || !content) {
-    return jsonResponse({ error: "Title and content are required" }, 400);
+  if (!cookies.auth_token || !config.sessions || !config.sessions[cookies.auth_token]) {
+    return false;
   }
 
-  const posts = (await store.get("posts/index.json", { type: "json", consistency: "strong" })).catch(() => []) || [];
-  const now = new Date();
-  const id = now.getTime().toString(36) + Math.random().toString(36).slice(2, 8);
-  const date = now.toISOString();
-
-  const post = {
-    id,
-    date,
-    tag: tag || "",
-    title,
-    content,
-    pin: pin || false,
-    hidden: hidden || false,
-    weather: weather || "",
-    location: location || "",
-    media: media || [],
-    archive: archive || "",
-  };
-
-  posts.push(post);
-  await store.setJSON("posts/index.json", posts);
-
-  if (tag) {
-    await updateTags(store, null, tag);
-  }
-
-  await updateCalendar(store, date.slice(0, 10), 1);
-
-  return jsonResponse({ post }, 201);
-}
-
-async function handlePut(request, store) {
-  const body = await request.json().catch(() => ({}));
-  const { id, title, content, tag, pin, hidden, weather, location, media, archive } = body;
-
-  if (!id) {
-    return jsonResponse({ error: "Post id is required" }, 400);
-  }
-
-  const posts = (await store.get("posts/index.json", { type: "json", consistency: "strong" })).catch(() => []) || [];
-  const index = posts.findIndex((p) => p.id === id);
-  if (index === -1) {
-    return jsonResponse({ error: "Post not found" }, 404);
-  }
-
-  const oldPost = posts[index];
-  const oldTag = oldPost.tag;
-  const newTag = tag !== undefined ? tag : oldTag;
-
-  posts[index] = {
-    ...oldPost,
-    ...(title !== undefined && { title }),
-    ...(content !== undefined && { content }),
-    ...(tag !== undefined && { tag }),
-    ...(pin !== undefined && { pin }),
-    ...(hidden !== undefined && { hidden }),
-    ...(weather !== undefined && { weather }),
-    ...(location !== undefined && { location }),
-    ...(media !== undefined && { media }),
-    ...(archive !== undefined && { archive }),
-  };
-
-  await store.setJSON("posts/index.json", posts);
-
-  if (oldTag !== newTag) {
-    await updateTags(store, oldTag, newTag);
-  }
-
-  return jsonResponse({ post: posts[index] });
-}
-
-async function handleDelete(request, store) {
-  const url = new URL(request.url);
-  const id = url.searchParams.get("id");
-
-  if (!id) {
-    return jsonResponse({ error: "Post id is required" }, 400);
-  }
-
-  const posts = (await store.get("posts/index.json", { type: "json", consistency: "strong" })).catch(() => []) || [];
-  const index = posts.findIndex((p) => p.id === id);
-  if (index === -1) {
-    return jsonResponse({ error: "Post not found" }, 404);
-  }
-
-  const deleted = posts.splice(index, 1)[0];
-  await store.setJSON("posts/index.json", posts);
-
-  if (deleted.tag) {
-    await updateTags(store, deleted.tag, null);
-  }
-
-  if (deleted.date) {
-    await updateCalendar(store, deleted.date.slice(0, 10), -1);
-  }
-
-  return jsonResponse({ success: true, deleted });
+  const session = config.sessions[cookies.auth_token];
+  return session.timeout > Date.now();
 }
 
 export async function onRequest(context) {
   const request = context.request;
+
   if (request.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: CORS_HEADERS });
   }
 
-  const store = getStore("notepro");
-
   try {
-    switch (request.method) {
-      case "GET":
-        return await handleGet(request, store);
-      case "POST":
-        return await handlePost(request, store);
-      case "PUT":
-        return await handlePut(request, store);
-      case "DELETE":
-        return await handleDelete(request, store);
-      default:
-        return jsonResponse({ error: "Method not allowed" }, 405);
+    const store = getStore();
+    const configData = await store.get('config.json').catch(() => null);
+
+    if (!configData) {
+      return ERROR_RESPONSE(10404, '系统未初始化');
     }
-  } catch (err) {
-    return jsonResponse({ error: err.message }, 500);
+
+    const config = JSON.parse(configData);
+    const url = new URL(request.url);
+    const action = url.searchParams.get('action') || 'get';
+
+    if (action === 'get') {
+      const isLogin = await checkAuth(request, config);
+
+      const postsData = await store.get('posts.json').catch(() => '[]');
+      let posts = JSON.parse(postsData);
+
+      const search = url.searchParams.get('search') || '';
+      const sort = parseInt(url.searchParams.get('sort') || '0');
+      const tag = url.searchParams.get('tag') || '';
+      const page = parseInt(url.searchParams.get('page') || '0');
+      const date = url.searchParams.get('date') || '';
+      const id = url.searchParams.get('id') || '';
+      const mode = parseInt(url.searchParams.get('mode') || '0');
+
+      if (!isLogin && config.siteVisibility === 'private') {
+        return SUCCESS_RESPONSE({
+          data: [],
+          pagination: { public: '1' }
+        });
+      }
+
+      let filtered = posts.filter(p => !p.archive || isLogin);
+
+      if (!isLogin) {
+        filtered = filtered.filter(p => !p.hidden);
+      }
+
+      if (search) {
+        const searchLower = search.toLowerCase();
+        if (mode === 0) {
+          filtered = filtered.filter(p =>
+            p.title.toLowerCase().includes(searchLower) ||
+            p.content.toLowerCase().includes(searchLower)
+          );
+        } else if (mode === 1) {
+          const keywords = search.split(',').map(k => k.trim()).filter(k => k);
+          filtered = filtered.filter(p =>
+            keywords.every(kw =>
+              p.title.toLowerCase().includes(kw.toLowerCase()) ||
+              p.content.toLowerCase().includes(kw.toLowerCase()) ||
+              (p.location && p.location.toLowerCase().includes(kw.toLowerCase())) ||
+              (p.tag && p.tag.toLowerCase().includes(kw.toLowerCase()))
+            )
+          );
+        }
+      }
+
+      if (tag && tag !== '-1') {
+        if (tag === '-999') {
+          filtered = filtered.filter(p => p.media && JSON.stringify(p.media).includes('Enc_'));
+        } else {
+          filtered = filtered.filter(p => p.tag === tag);
+        }
+      }
+
+      if (!isLogin) {
+        const tagsData = await store.get('tags.json').catch(() => '[]');
+        const tags = JSON.parse(tagsData);
+        const hiddenTags = tags.filter(t => t.hidden).map(t => t.name);
+        filtered = filtered.filter(p => !hiddenTags.includes(p.tag));
+      }
+
+      if (date) {
+        if (config.calendarSearch === 'only') {
+          filtered = filtered.filter(p => p.date.startsWith(date));
+        } else {
+          filtered = filtered.filter(p => p.date >= date);
+        }
+      }
+
+      if (sort === 4 && !isLogin) {
+        filtered = [];
+      }
+
+      const viewDate = new Date(Date.now() - (config.viewRange || 0) * 86400000).toISOString().split('T')[0];
+      if (config.viewRange > 0 && !isLogin) {
+        filtered = filtered.filter(p => p.date >= viewDate);
+      }
+
+      let sorted = [...filtered];
+      switch (sort) {
+        case 0:
+          sorted.sort((a, b) => {
+            if (b.pin !== a.pin) return (b.pin || 0) - (a.pin || 0);
+            return b.date.localeCompare(a.date);
+          });
+          break;
+        case 1:
+          sorted.sort((a, b) => b.date.localeCompare(a.date));
+          break;
+        case 2:
+          sorted.sort((a, b) => a.date.localeCompare(b.date));
+          break;
+        case 3:
+          if (!isLogin) return UNAUTHORIZED_RESPONSE();
+          sorted.sort((a, b) => {
+            if (b.hidden !== a.hidden) return (b.hidden || 0) - (a.hidden || 0);
+            return b.id - a.id;
+          });
+          break;
+        case 4:
+          sorted.sort((a, b) => a.id - b.id);
+          break;
+      }
+
+      const postCount = config.postCount || 10;
+      const totalItems = sorted.length;
+      const totalPages = Math.max(1, Math.ceil(totalItems / postCount));
+      const offset = page * postCount;
+
+      let continueData = false;
+      if (offset + postCount < totalItems) {
+        const checkDate = sorted[offset + postCount]?.date;
+        if (checkDate && checkDate < viewDate) {
+          continueData = true;
+        }
+      }
+
+      const paginated = sorted.slice(offset, offset + postCount);
+
+      const result = paginated.map(p => ({
+        id: p.id,
+        date: p.date,
+        tag: p.tag,
+        title: p.title,
+        content: p.content,
+        hidden: p.hidden,
+        pin: p.pin,
+        weather: p.weather,
+        location: p.location,
+        pics: p.media,
+        archive: p.archive,
+        is_hidden: config.postHiddenTip
+      }));
+
+      return SUCCESS_RESPONSE({
+        data: result,
+        pagination: {
+          current_page: page + 1,
+          total_pages: totalPages,
+          total_items: totalItems,
+          items_per_page: postCount,
+          has_previous: page > 0,
+          has_next: !continueData && page + 1 < totalPages,
+          avg: id ? (continueData ? config.viewRange : 0) : -1
+        }
+      });
+    }
+
+    const isLogin = await checkAuth(request, config);
+
+    if (!isLogin) {
+      return UNAUTHORIZED_RESPONSE();
+    }
+
+    if (action === 'new') {
+      const body = await request.json().catch(() => ({}));
+      const { top = 0, hidden = 0, title, tag, content, media, weather, location, date } = body;
+
+      const postsData = await store.get('posts.json').catch(() => '[]');
+      const posts = JSON.parse(postsData);
+
+      const maxId = posts.length > 0 ? Math.max(...posts.map(p => p.id)) : 0;
+      const newId = maxId + 1;
+      const finalTag = tag || config.defaultTag || '默认';
+      const finalDate = date || new Date().toISOString().replace('T', ' ').substring(0, 16);
+
+      const newPost = {
+        id: newId,
+        date: finalDate,
+        tag: finalTag,
+        title: title || '',
+        content: content || '',
+        top: parseInt(top),
+        hidden: parseInt(hidden),
+        weather: weather || {},
+        location: location || {},
+        media: media || {},
+        archive: 0,
+        created: Date.now()
+      };
+
+      posts.push(newPost);
+      await store.put('posts.json', JSON.stringify(posts, null, 2));
+
+      await updateTag(store, finalTag, 1, parseInt(hidden));
+      await updateCalendar(store, finalDate.substring(0, 7), parseInt(finalDate.split('-')[2]));
+
+      return SUCCESS_RESPONSE({ id: newId }, '创建成功');
+    }
+
+    if (action === 'update') {
+      const body = await request.json().catch(() => ({}));
+      const { id, top, hidden, title, tag, content, media, weather, location, date, archive } = body;
+
+      const postsData = await store.get('posts.json').catch(() => '[]');
+      const posts = JSON.parse(postsData);
+      const postIndex = posts.findIndex(p => p.id === parseInt(id));
+
+      if (postIndex === -1) {
+        return ERROR_RESPONSE(10404, '文章不存在');
+      }
+
+      const oldPost = posts[postIndex];
+
+      if (tag !== oldPost.tag) {
+        await updateTag(store, tag, 1, parseInt(hidden));
+        await updateTag(store, oldPost.tag, -1, parseInt(oldPost.hidden));
+      } else if (hidden !== oldPost.hidden) {
+        await updateTag(store, tag, 0, parseInt(hidden) - parseInt(oldPost.hidden));
+      }
+
+      if (date !== oldPost.date) {
+        await updateCalendar(store, date.substring(0, 7), parseInt(date.split('-')[2]));
+        await updateCalendar(store, oldPost.date.substring(0, 7), parseInt(oldPost.date.split('-')[2]));
+      }
+
+      posts[postIndex] = {
+        ...oldPost,
+        top: parseInt(top ?? oldPost.top),
+        hidden: parseInt(hidden ?? oldPost.hidden),
+        title: title ?? oldPost.title,
+        tag: tag ?? oldPost.tag,
+        content: content ?? oldPost.content,
+        media: media ?? oldPost.media,
+        weather: weather ?? oldPost.weather,
+        location: location ?? oldPost.location,
+        date: date ?? oldPost.date,
+        archive: parseInt(archive ?? oldPost.archive)
+      };
+
+      await store.put('posts.json', JSON.stringify(posts, null, 2));
+
+      return SUCCESS_RESPONSE({}, '更新成功');
+    }
+
+    if (action === 'delete') {
+      const body = await request.json().catch(() => ({}));
+      const { id } = body;
+
+      const postsData = await store.get('posts.json').catch(() => '[]');
+      const posts = JSON.parse(postsData);
+      const postIndex = posts.findIndex(p => p.id === parseInt(id));
+
+      if (postIndex === -1) {
+        return ERROR_RESPONSE(10404, '文章不存在');
+      }
+
+      const deletedPost = posts[postIndex];
+      posts.splice(postIndex, 1);
+      await store.put('posts.json', JSON.stringify(posts, null, 2));
+
+      await updateTag(store, deletedPost.tag, -1, deletedPost.hidden ? 0 : -1);
+      await updateCalendar(store, deletedPost.date.substring(0, 7), parseInt(deletedPost.date.split('-')[2]), -1);
+
+      return SUCCESS_RESPONSE({}, '删除成功');
+    }
+
+    return ERROR_RESPONSE(10400, '未知操作');
+  } catch (error) {
+    return ERROR_RESPONSE(10500, '请求失败: ' + error.message);
   }
+}
+
+async function updateTag(store, tagName, mode, visitChange = 0) {
+  const tagsData = await store.get('tags.json').catch(() => '[]');
+  let tags = JSON.parse(tagsData);
+
+  const tagIndex = tags.findIndex(t => t.name === tagName);
+
+  if (tagIndex === -1) {
+    tags.push({
+      name: tagName,
+      count: mode > 0 ? 1 : 0,
+      count_visit: visitChange > 0 ? 1 : 0,
+      hidden: 0
+    });
+  } else {
+    tags[tagIndex].count = Math.max(0, (tags[tagIndex].count || 0) + mode);
+    tags[tagIndex].count_visit = Math.max(0, (tags[tagIndex].count_visit || 0) + visitChange);
+
+    if (tags[tagIndex].count === 0) {
+      tags.splice(tagIndex, 1);
+    }
+  }
+
+  await store.put('tags.json', JSON.stringify(tags, null, 2));
+}
+
+async function updateCalendar(store, yearMonth, day, mode = 1) {
+  const calendarData = await store.get('calendar.json').catch(() => '{}');
+  let calendar = JSON.parse(calendarData);
+
+  if (!calendar[yearMonth]) {
+    const daysInMonth = new Date(yearMonth + '-01');
+    calendar[yearMonth] = {};
+    for (let i = 1; i <= 31; i++) {
+      calendar[yearMonth][i] = 0;
+    }
+  }
+
+  calendar[yearMonth][day] = Math.max(0, (calendar[yearMonth][day] || 0) + mode);
+
+  await store.put('calendar.json', JSON.stringify(calendar, null, 2));
 }
