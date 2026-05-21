@@ -1,16 +1,6 @@
 {
   "version": 2,
   "build": {
-    "external": ["@edgeone/pages-blob"]
-  },
-  "functions": {
-    "api/test": {
-      "runtime": "edge",
-      "entry": "api/test.js"
-    },
-    "api/init": {
-      "runtime": "edge",
-      "entry": "api/init.js"
-    }
+    "external": []
   }
 }
