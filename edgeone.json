@@ -3,6 +3,11 @@
   "build": {
     "external": ["@edgeone/pages-blob"]
   },
+  "cloudFunctions": {
+    "nodejs": {
+      "externalNodeModules": ["@edgeone/pages-blob"]
+    }
+  },
   "functions": {
     "api/init": {
       "runtime": "nodejs20",
