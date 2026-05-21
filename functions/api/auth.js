@@ -1,8 +1,4 @@
-import { getBucket } from '@edgeone/pages-blob';
-
-function getStore(bucketName = 'notepro') {
-  return getBucket(bucketName);
-}
+import { getStore } from '@edgeone/pages-blob';
 
 async function sha256(message) {
   const msgBuffer = new TextEncoder().encode(message);
@@ -17,7 +13,7 @@ async function generateToken() {
   return Array.from(array, b => b.toString(16).padStart(2, '0')).join('');
 }
 
-export async function onRequest(context) {
+export default async function onRequest(context) {
   const request = context.request;
 
   const CORS_HEADERS = {
@@ -27,12 +23,12 @@ export async function onRequest(context) {
     'Content-Type': 'application/json'
   };
 
-  if (request.method === "OPTIONS") {
+  if (request.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: CORS_HEADERS });
   }
 
   try {
-    const store = getStore();
+    const store = getStore('notepro');
     const configData = await store.get('config.json').catch(() => null);
 
     if (!configData) {
@@ -44,7 +40,7 @@ export async function onRequest(context) {
 
     const config = JSON.parse(configData);
 
-    if (request.method === "GET") {
+    if (request.method === 'GET') {
       const url = new URL(request.url);
       const action = url.searchParams.get('action') || 'status';
 
@@ -116,7 +112,7 @@ export async function onRequest(context) {
         created: Date.now()
       };
 
-      await store.put('config.json', JSON.stringify(config, null, 2));
+      await store.set('config.json', JSON.stringify(config, null, 2));
 
       const response = new Response(JSON.stringify({
         code: 10200,
@@ -148,7 +144,7 @@ export async function onRequest(context) {
 
       if (cookies.auth_token && config.sessions) {
         delete config.sessions[cookies.auth_token];
-        await store.put('config.json', JSON.stringify(config, null, 2));
+        await store.set('config.json', JSON.stringify(config, null, 2));
       }
 
       const response = new Response(JSON.stringify({ code: 10200, info: '已退出登录' }), {

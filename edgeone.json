@@ -2,40 +2,5 @@
   "version": 2,
   "build": {
     "external": ["@edgeone/pages-blob"]
-  },
-  "cloudFunctions": {
-    "nodejs": {
-      "externalNodeModules": ["@edgeone/pages-blob"]
-    }
-  },
-  "functions": {
-    "api/init": {
-      "runtime": "nodejs20",
-      "entry": "api/init.js"
-    },
-    "api/auth": {
-      "runtime": "nodejs20",
-      "entry": "api/auth.js"
-    },
-    "api/posts": {
-      "runtime": "nodejs20",
-      "entry": "api/posts.js"
-    },
-    "api/tags": {
-      "runtime": "nodejs20",
-      "entry": "api/tags.js"
-    },
-    "api/calendar": {
-      "runtime": "nodejs20",
-      "entry": "api/calendar.js"
-    },
-    "api/settings": {
-      "runtime": "nodejs20",
-      "entry": "api/settings.js"
-    },
-    "api/upload": {
-      "runtime": "nodejs20",
-      "entry": "api/upload.js"
-    }
   }
 }

@@ -1,10 +1,6 @@
-import { getBucket } from '@edgeone/pages-blob';
+import { getStore } from '@edgeone/pages-blob';
 
-function getStore(bucketName = 'notepro') {
-  return getBucket(bucketName);
-}
-
-export async function onRequest(context) {
+export default async function onRequest(context) {
   const request = context.request;
 
   const CORS_HEADERS = {
@@ -14,16 +10,16 @@ export async function onRequest(context) {
     'Content-Type': 'application/json'
   };
 
-  if (request.method === "OPTIONS") {
+  if (request.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: CORS_HEADERS });
   }
 
   try {
-    const store = getStore();
+    const store = getStore('notepro');
     const configData = await store.get('config.json').catch(() => null);
 
     if (request.method === 'POST') {
-      const body = await request.json().catch(() => {});
+      const body = await request.json().catch(() => ({}));
       const password = body?.password;
 
       if (!password || password.length < 4) {
@@ -50,7 +46,7 @@ export async function onRequest(context) {
         siteDescription: 'Personal notes and blog',
         siteKeywords: '',
         siteTimeZone: 'Asia/Shanghai',
-        siteLang: 'zh_CN',
+        siteLang: 'zh-CN',
         siteCharset: 'UTF-8',
         siteZoom: 0,
         userName: '浮生若梦',
@@ -100,10 +96,10 @@ export async function onRequest(context) {
         sessions: {}
       };
 
-      await store.put('config.json', JSON.stringify(defaultConfig, null, 2));
-      await store.put('posts.json', '[]');
-      await store.put('tags.json', '[]');
-      await store.put('calendar.json', '{}');
+      await store.set('config.json', JSON.stringify(defaultConfig, null, 2));
+      await store.set('posts.json', '[]');
+      await store.set('tags.json', '[]');
+      await store.set('calendar.json', '{}');
 
       return new Response(JSON.stringify({ code: 10200, info: '初始化成功', initialized: false }), {
         status: 200,
@@ -119,7 +115,6 @@ export async function onRequest(context) {
       status: 200,
       headers: CORS_HEADERS
     });
-
   } catch (error) {
     return new Response(JSON.stringify({ code: 10500, info: '请求失败: ' + error.message }), {
       status: 500,
