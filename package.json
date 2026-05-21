@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "author": "wujinpai",
-  "description": "A personal note and blog system deployed on EdgeOne Pages",
+  "description": "基于 EdgeOne Pages 的个人笔记和博客系统",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
