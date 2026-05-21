@@ -38,14 +38,14 @@ async function handleGetLoginStatus(request, store) {
   const storedToken = await store.get("auth/token.json", {
     type: "json",
     consistency: "strong",
-  });
+  }).catch(() => null);
 
   if (!storedToken || storedToken.token !== token) {
     return jsonResponse({ authenticated: false });
   }
 
   if (storedToken.expiresAt && Date.now() > storedToken.expiresAt) {
-    await store.delete("auth/token.json");
+    await store.delete("auth/token.json").catch(() => {});
     return jsonResponse({ authenticated: false });
   }
 
@@ -53,15 +53,14 @@ async function handleGetLoginStatus(request, store) {
 }
 
 async function handleLogin(request, store) {
-  const body = await request.json();
+  const body = await request.json().catch(() => ({}));
   const { password } = body;
 
   if (!password) {
     return jsonResponse({ error: "Password is required" }, 400);
   }
 
-  const settings =
-    (await store.get("settings/config.json", { type: "json", consistency: "strong" })) || {};
+  const settings = (await store.get("settings/config.json", { type: "json", consistency: "strong" })).catch(() => ({})) || {};
   const systemSettings = settings.system || {};
   const storedHash = systemSettings.passwordHash;
   const salt = systemSettings.passwordSalt || "notepro-default-salt";
@@ -84,7 +83,8 @@ async function handleLogin(request, store) {
   return jsonResponse({ token, expiresAt });
 }
 
-export async function onRequest({ request }) {
+export async function onRequest(context) {
+  const request = context.request;
   if (request.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: CORS_HEADERS });
   }
