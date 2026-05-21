@@ -1,6 +1,6 @@
 {
   "version": 2,
   "build": {
-    "external": []
+    "external": ["@edgeone/pages-blob"]
   }
 }
