@@ -1,19 +1,21 @@
-import { CORS_HEADERS } from '../_shared.js';
+import { getBucket } from '@edgeone/pages-blob';
 
 function getStore(bucketName = 'notepro') {
-  return __STATIC_CONTENT.bucket(bucketName);
+  return getBucket(bucketName);
 }
 
 export async function onRequest(context) {
   const request = context.request;
 
-  const responseHeaders = {
-    ...CORS_HEADERS,
+  const CORS_HEADERS = {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     'Content-Type': 'application/json'
   };
 
   if (request.method === "OPTIONS") {
-    return new Response(null, { status: 204, headers: responseHeaders });
+    return new Response(null, { status: 204, headers: CORS_HEADERS });
   }
 
   try {
@@ -27,14 +29,14 @@ export async function onRequest(context) {
       if (!password || password.length < 4) {
         return new Response(JSON.stringify({ code: 10401, info: '密码长度不足或为空' }), {
           status: 400,
-          headers: responseHeaders
+          headers: CORS_HEADERS
         });
       }
 
       if (configData) {
         return new Response(JSON.stringify({ code: 10200, info: '已初始化', initialized: true }), {
           status: 200,
-          headers: responseHeaders
+          headers: CORS_HEADERS
         });
       }
 
@@ -105,7 +107,7 @@ export async function onRequest(context) {
 
       return new Response(JSON.stringify({ code: 10200, info: '初始化成功', initialized: false }), {
         status: 200,
-        headers: responseHeaders
+        headers: CORS_HEADERS
       });
     }
 
@@ -115,13 +117,13 @@ export async function onRequest(context) {
       initialized: !!configData 
     }), {
       status: 200,
-      headers: responseHeaders
+      headers: CORS_HEADERS
     });
 
   } catch (error) {
     return new Response(JSON.stringify({ code: 10500, info: '请求失败: ' + error.message }), {
       status: 500,
-      headers: responseHeaders
+      headers: CORS_HEADERS
     });
   }
 }
