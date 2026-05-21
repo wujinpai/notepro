@@ -1,138 +1,127 @@
-import { getStore } from "@edgeone/pages-blob";
+import { CORS_HEADERS } from '../_shared.js';
 
-const CORS_HEADERS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization",
-};
-
-function jsonResponse(data, status = 200) {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: { "Content-Type": "application/json", ...CORS_HEADERS },
-  });
-}
-
-async function hashPassword(password, salt) {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(salt + password);
-  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
-  return Array.from(new Uint8Array(hashBuffer), (b) =>
-    b.toString(16).padStart(2, "0")
-  ).join("");
-}
-
-function generateSalt() {
-  const bytes = new Uint8Array(16);
-  crypto.getRandomValues(bytes);
-  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
-}
-
-const DEFAULT_SETTINGS = {
-  personal: {
-    nickname: "NotePro",
-    avatar: "",
-    signature: "A simple note & blog application",
-    bio: "",
-  },
-  website: {
-    title: "NotePro",
-    description: "A simple note & blog application powered by EdgeOne",
-    footer: "Powered by NotePro",
-    favicon: "",
-    logo: "",
-  },
-  content: {
-    postsPerPage: 10,
-    dateFormat: "YYYY-MM-DD HH:mm",
-    timezone: "Asia/Shanghai",
-    language: "zh-CN",
-    markdown: true,
-  },
-  system: {
-    passwordHash: "",
-    passwordSalt: "",
-    allowRegister: false,
-    maintenance: false,
-  },
-  colors: {
-    main: "#39393a",
-    background: "#f7f7f7",
-    card: "#ffffff",
-    card2: "#9891cd",
-    title: "#39393a",
-    content: "#39393a",
-    desc: "#7a7a7a",
-    tool: "#f1f1f1",
-    button: "#29adff",
-    input: "#707070",
-    tag: "#8f8f8f",
-  },
-};
-
-async function handleInit(request, store) {
-  const existing = await store.get("settings/config.json", {
-    type: "json",
-    consistency: "strong",
-  }).catch(() => null);
-  if (existing && existing.system && existing.system.passwordHash) {
-    return jsonResponse({ error: "Application already initialized" }, 400);
-  }
-
-  const body = await request.json().catch(() => ({}));
-  const password = body.password || "admin123";
-
-  const salt = generateSalt();
-  const passwordHash = await hashPassword(password, salt);
-
-  const settings = {
-    ...DEFAULT_SETTINGS,
-    personal: { ...DEFAULT_SETTINGS.personal, ...(body.personal || {}) },
-    website: { ...DEFAULT_SETTINGS.website, ...(body.website || {}) },
-    content: { ...DEFAULT_SETTINGS.content, ...(body.content || {}) },
-    system: {
-      ...DEFAULT_SETTINGS.system,
-      ...(body.system || {}),
-      passwordHash,
-      passwordSalt: salt,
-    },
-    colors: { ...DEFAULT_SETTINGS.colors, ...(body.colors || {}) },
-  };
-
-  await store.setJSON("settings/config.json", settings);
-  await store.setJSON("posts/index.json", []);
-  await store.setJSON("tags/index.json", []);
-
-  const now = new Date();
-  const yearMonth = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}`;
-  await store.setJSON(`calendar/${yearMonth}.json`, {});
-
-  return jsonResponse(
-    {
-      message: "Application initialized successfully",
-      settings: {
-        ...settings,
-        system: { ...settings.system, passwordHash: "***" },
-      },
-    },
-    201
-  );
+function getStore(bucketName = 'notepro') {
+  return __STATIC_CONTENT.bucket(bucketName);
 }
 
 export async function onRequest(context) {
   const request = context.request;
+
+  const responseHeaders = {
+    ...CORS_HEADERS,
+    'Content-Type': 'application/json'
+  };
+
   if (request.method === "OPTIONS") {
-    return new Response(null, { status: 204, headers: CORS_HEADERS });
+    return new Response(null, { status: 204, headers: responseHeaders });
   }
 
-  const store = getStore("notepro");
-
   try {
-    if (request.method === "POST") {
-      return await handleInit(request, store);
+    const store = getStore();
+    const configData = await store.get('config.json').catch(() => null);
+
+    if (request.method === 'POST') {
+      const body = await request.json().catch(() => {});
+      const password = body?.password;
+
+      if (!password || password.length < 4) {
+        return new Response(JSON.stringify({ code: 10401, info: '密码长度不足或为空' }), {
+          status: 400,
+          headers: responseHeaders
+        });
+      }
+
+      if (configData) {
+        return new Response(JSON.stringify({ code: 10200, info: '已初始化', initialized: true }), {
+          status: 200,
+          headers: responseHeaders
+        });
+      }
+
+      const salt = Array.from(crypto.getRandomValues(new Uint8Array(16)), b => b.toString(16).padStart(2, '0')).join('');
+      const msgBuffer = new TextEncoder().encode(salt + password + salt);
+      const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+      const passHash = Array.from(new Uint8Array(hashBuffer), b => b.toString(16).padStart(2, '0')).join('');
+
+      const defaultConfig = {
+        siteTitle: '格物',
+        siteDescription: 'Personal notes and blog',
+        siteKeywords: '',
+        siteTimeZone: 'Asia/Shanghai',
+        siteLang: 'zh_CN',
+        siteCharset: 'UTF-8',
+        siteZoom: 0,
+        userName: '浮生若梦',
+        userSign: '我为良世当浮尘，天地自为我提灯…',
+        userEmail: '',
+        mainColor: '#39393a',
+        backgroundColor: '#f7f7f7',
+        cardColor: '#ffffff',
+        card2Color: '#9891cd',
+        titleColor: '#39393a',
+        contentColor: '#39393a',
+        descColor: '#7a7a7a',
+        toolColor: '#f1f1f1',
+        buttonColor: '#29adff',
+        inputColor: '#707070',
+        tagColor: '#53c3e9',
+        postCount: 10,
+        postHiddenTip: 0,
+        viewRange: 0,
+        defaultTag: '随记',
+        visitMode: 0,
+        backTop: 1,
+        pictureZip: 0,
+        pictureEncryption: 0,
+        calendarSearch: 'only',
+        siteVisibility: 'public',
+        pictureZipHigh: 0,
+        locationShowMode: 12,
+        defaultLocation: '',
+        socialMedia: {},
+        siteMap: [],
+        copyright: '',
+        cors: 0,
+        uid: 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+          const r = Math.random() * 16 | 0;
+          const v = c === 'x' ? r : (r & 0x3 | 0x8);
+          return v.toString(16);
+        }),
+        version: '1.0.0',
+        cache: Date.now(),
+        loginTimeout: 3600,
+        pseudoStatic: 1,
+        displayTip: 1,
+        initialized: true,
+        passHash: passHash,
+        passSalt: salt,
+        sessions: {}
+      };
+
+      await store.put('config.json', JSON.stringify(defaultConfig, null, 2));
+      await store.put('posts.json', '[]');
+      await store.put('tags.json', '[]');
+      await store.put('calendar.json', '{}');
+
+      return new Response(JSON.stringify({ code: 10200, info: '初始化成功', initialized: false }), {
+        status: 200,
+        headers: responseHeaders
+      });
     }
-    return jsonResponse({ error: "Method not allowed" }, 405);
-  } catch (err) {
-    return jsonResponse({ error: err.message }, 500);
+
+    return new Response(JSON.stringify({ 
+      code: 10200, 
+      info: configData ? '已初始化' : '未初始化',
+      initialized: !!configData 
+    }), {
+      status: 200,
+      headers: responseHeaders
+    });
+
+  } catch (error) {
+    return new Response(JSON.stringify({ code: 10500, info: '请求失败: ' + error.message }), {
+      status: 500,
+      headers: responseHeaders
+    });
   }
 }

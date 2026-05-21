@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "author": "wujinpai",
+  "description": "A personal note and blog system deployed on EdgeOne Pages",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
