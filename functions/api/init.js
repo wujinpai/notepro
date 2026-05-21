@@ -74,7 +74,7 @@ async function handleInit(request, store) {
   const existing = await store.get("settings/config.json", {
     type: "json",
     consistency: "strong",
-  });
+  }).catch(() => null);
   if (existing && existing.system && existing.system.passwordHash) {
     return jsonResponse({ error: "Application already initialized" }, 400);
   }
@@ -119,7 +119,8 @@ async function handleInit(request, store) {
   );
 }
 
-export async function onRequest({ request }) {
+export async function onRequest(context) {
+  const request = context.request;
   if (request.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: CORS_HEADERS });
   }
