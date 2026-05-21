@@ -1,48 +1,95 @@
-import { getStore } from "@edgeone/pages-blob";
+import { CORS_HEADERS, SUCCESS_RESPONSE, ERROR_RESPONSE, UNAUTHORIZED_RESPONSE } from '../_shared.js';
 
-const CORS_HEADERS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization",
-};
-
-function jsonResponse(data, status = 200) {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: { "Content-Type": "application/json", ...CORS_HEADERS },
-  });
+function getStore(bucketName = 'notepro') {
+  return __STATIC_CONTENT.bucket(bucketName);
 }
 
-async function handleGet(request, store) {
-  const url = new URL(request.url);
-  const month = url.searchParams.get("month");
+async function checkAuth(request, config) {
+  const cookieHeader = request.headers.get('cookie') || '';
+  const cookies = Object.fromEntries(
+    cookieHeader.split(';').map(c => c.trim().split('='))
+  );
 
-  if (!month) {
-    return jsonResponse({ error: "Month parameter is required (format: YYYYMM)" }, 400);
+  if (!cookies.auth_token || !config.sessions || !config.sessions[cookies.auth_token]) {
+    return false;
   }
 
-  if (!/^\d{6}$/.test(month)) {
-    return jsonResponse({ error: "Invalid month format, use YYYYMM" }, 400);
-  }
-
-  const key = `calendar/${month}.json`;
-  const calendar = (await store.get(key, { type: "json" })) || {};
-  return jsonResponse({ month, calendar });
+  const session = config.sessions[cookies.auth_token];
+  return session.timeout > Date.now();
 }
 
-export async function onRequest({ request }) {
+export async function onRequest(context) {
+  const request = context.request;
+
   if (request.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: CORS_HEADERS });
   }
 
-  const store = getStore("notepro");
-
   try {
-    if (request.method === "GET") {
-      return await handleGet(request, store);
+    const store = getStore();
+    const configData = await store.get('config.json').catch(() => null);
+
+    if (!configData) {
+      return ERROR_RESPONSE(10404, '系统未初始化');
     }
-    return jsonResponse({ error: "Method not allowed" }, 405);
-  } catch (err) {
-    return jsonResponse({ error: err.message }, 500);
+
+    const config = JSON.parse(configData);
+    const isLogin = await checkAuth(request, config);
+    const url = new URL(request.url);
+    const mode = url.searchParams.get('mode') || '';
+    const dateParam = url.searchParams.get('date') || '';
+
+    const calendarData = await store.get('calendar.json').catch(() => '{}');
+    const calendar = JSON.parse(calendarData);
+
+    const viewDate = new Date(Date.now() - (config.viewRange + 30) * 86400000);
+    const blocked = config.viewRange > 0 && !isLogin;
+    const viewYm = viewDate.getFullYear() * 100 + (viewDate.getMonth() + 1);
+
+    if (mode === 'D') {
+      const result = [];
+
+      for (const [yearMonth, days] of Object.entries(calendar)) {
+        const ym = parseInt(yearMonth);
+        if (blocked && ym <= viewYm) continue;
+
+        for (const day of Object.values(days)) {
+          result.push(day);
+        }
+      }
+
+      return SUCCESS_RESPONSE({ data: result });
+    }
+
+    const array = {};
+
+    for (const [yearMonth, days] of Object.entries(calendar)) {
+      const ym = parseInt(yearMonth);
+      if (blocked && ym <= viewYm) continue;
+
+      const year = Math.floor(ym / 100);
+      const month = ym % 100;
+
+      if (!array[year]) {
+        array[year] = [];
+      }
+
+      const monthsWithPosts = new Set();
+      for (const [day, count] of Object.entries(days)) {
+        if (count > 0) {
+          monthsWithPosts.add(parseInt(day));
+        }
+      }
+
+      for (const monthNum of monthsWithPosts) {
+        if (!array[year].includes(monthNum)) {
+          array[year].push(monthNum);
+        }
+      }
+    }
+
+    return SUCCESS_RESPONSE({ data: array });
+  } catch (error) {
+    return ERROR_RESPONSE(10500, '请求失败: ' + error.message);
   }
 }
