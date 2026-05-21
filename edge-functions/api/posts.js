@@ -1,8 +1,4 @@
-import { getBucket } from '@edgeone/pages-blob';
-
-function getStore(bucketName = 'notepro') {
-  return getBucket(bucketName);
-}
+import { getStore } from '@edgeone/pages-blob';
 
 async function checkAuth(request, config) {
   const cookieHeader = request.headers.get('cookie') || '';
@@ -33,7 +29,7 @@ export default async function onRequest(context) {
   }
 
   try {
-    const store = getStore();
+    const store = getStore('notepro');
     const configData = await store.get('config.json').catch(() => null);
 
     if (!configData) {
@@ -178,7 +174,7 @@ export default async function onRequest(context) {
     };
 
     posts.push(newPost);
-    await store.put('posts.json', JSON.stringify(posts, null, 2));
+    await store.set('posts.json', JSON.stringify(posts, null, 2));
 
     return new Response(JSON.stringify({ code: 10200, info: '创建成功', id: newId }), {
       status: 200,

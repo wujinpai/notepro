@@ -1,8 +1,4 @@
-import { getBucket } from '@edgeone/pages-blob';
-
-function getStore(bucketName = 'notepro') {
-  return getBucket(bucketName);
-}
+import { getStore } from '@edgeone/pages-blob';
 
 async function sha256(message) {
   const msgBuffer = new TextEncoder().encode(message);
@@ -32,7 +28,7 @@ export default async function onRequest(context) {
   }
 
   try {
-    const store = getStore();
+    const store = getStore('notepro');
     const configData = await store.get('config.json').catch(() => null);
 
     if (!configData) {
@@ -116,7 +112,7 @@ export default async function onRequest(context) {
         created: Date.now()
       };
 
-      await store.put('config.json', JSON.stringify(config, null, 2));
+      await store.set('config.json', JSON.stringify(config, null, 2));
 
       const response = new Response(JSON.stringify({
         code: 10200,
@@ -148,7 +144,7 @@ export default async function onRequest(context) {
 
       if (cookies.auth_token && config.sessions) {
         delete config.sessions[cookies.auth_token];
-        await store.put('config.json', JSON.stringify(config, null, 2));
+        await store.set('config.json', JSON.stringify(config, null, 2));
       }
 
       const response = new Response(JSON.stringify({ code: 10200, info: '已退出登录' }), {

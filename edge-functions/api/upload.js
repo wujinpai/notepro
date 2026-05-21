@@ -1,8 +1,4 @@
-import { getBucket } from '@edgeone/pages-blob';
-
-function getStore(bucketName = 'notepro') {
-  return getBucket(bucketName);
-}
+import { getStore } from '@edgeone/pages-blob';
 
 export default async function onRequest(context) {
   const request = context.request;
@@ -19,7 +15,7 @@ export default async function onRequest(context) {
   }
 
   try {
-    const store = getStore();
+    const store = getStore('notepro');
     const configData = await store.get('config.json').catch(() => null);
 
     if (!configData) {
@@ -50,7 +46,7 @@ export default async function onRequest(context) {
     const mediaDir = `media/${new Date().toISOString().substring(0, 7)}`;
     const fullPath = `${mediaDir}/${newFileName}`;
 
-    await store.put(fullPath, fileData);
+    await store.set(fullPath, fileData);
 
     const imageUrl = `/media/${new Date().toISOString().substring(0, 7)}/${newFileName}`;
 

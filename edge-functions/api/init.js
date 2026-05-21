@@ -1,8 +1,4 @@
-import { getBucket } from '@edgeone/pages-blob';
-
-function getStore(bucketName = 'notepro') {
-  return getBucket(bucketName);
-}
+import { getStore } from '@edgeone/pages-blob';
 
 export default async function onRequest(context) {
   const request = context.request;
@@ -19,7 +15,7 @@ export default async function onRequest(context) {
   }
 
   try {
-    const store = getStore();
+    const store = getStore('notepro');
     const configData = await store.get('config.json').catch(() => null);
 
     if (request.method === 'POST') {
@@ -100,10 +96,10 @@ export default async function onRequest(context) {
         sessions: {}
       };
 
-      await store.put('config.json', JSON.stringify(defaultConfig, null, 2));
-      await store.put('posts.json', '[]');
-      await store.put('tags.json', '[]');
-      await store.put('calendar.json', '{}');
+      await store.set('config.json', JSON.stringify(defaultConfig, null, 2));
+      await store.set('posts.json', '[]');
+      await store.set('tags.json', '[]');
+      await store.set('calendar.json', '{}');
 
       return new Response(JSON.stringify({ code: 10200, info: '初始化成功', initialized: false }), {
         status: 200,
