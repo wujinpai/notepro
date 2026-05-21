@@ -1,7 +1,7 @@
-import { CORS_HEADERS, SUCCESS_RESPONSE, ERROR_RESPONSE, UNAUTHORIZED_RESPONSE } from '../_shared.js';
+import { getBucket } from '@edgeone/pages-blob';
 
 function getStore(bucketName = 'notepro') {
-  return __STATIC_CONTENT.bucket(bucketName);
+  return getBucket(bucketName);
 }
 
 async function checkAuth(request, config) {
@@ -21,6 +21,13 @@ async function checkAuth(request, config) {
 export async function onRequest(context) {
   const request = context.request;
 
+  const CORS_HEADERS = {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Content-Type': 'application/json'
+  };
+
   if (request.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: CORS_HEADERS });
   }
@@ -30,7 +37,10 @@ export async function onRequest(context) {
     const configData = await store.get('config.json').catch(() => null);
 
     if (!configData) {
-      return ERROR_RESPONSE(10404, '系统未初始化');
+      return new Response(JSON.stringify({ code: 10404, info: '系统未初始化' }), {
+        status: 404,
+        headers: CORS_HEADERS
+      });
     }
 
     const config = JSON.parse(configData);
@@ -58,7 +68,10 @@ export async function onRequest(context) {
         }
       }
 
-      return SUCCESS_RESPONSE({ data: result });
+      return new Response(JSON.stringify({ code: 10200, info: 'success', data: result }), {
+        status: 200,
+        headers: CORS_HEADERS
+      });
     }
 
     const array = {};
@@ -88,8 +101,14 @@ export async function onRequest(context) {
       }
     }
 
-    return SUCCESS_RESPONSE({ data: array });
+    return new Response(JSON.stringify({ code: 10200, info: 'success', data: array }), {
+      status: 200,
+      headers: CORS_HEADERS
+    });
   } catch (error) {
-    return ERROR_RESPONSE(10500, '请求失败: ' + error.message);
+    return new Response(JSON.stringify({ code: 10500, info: '请求失败: ' + error.message }), {
+      status: 500,
+      headers: CORS_HEADERS
+    });
   }
 }

@@ -1,7 +1,7 @@
-import { CORS_HEADERS, SUCCESS_RESPONSE, ERROR_RESPONSE, UNAUTHORIZED_RESPONSE } from '../_shared.js';
+import { getBucket } from '@edgeone/pages-blob';
 
 function getStore(bucketName = 'notepro') {
-  return __STATIC_CONTENT.bucket(bucketName);
+  return getBucket(bucketName);
 }
 
 async function checkAuth(request, config) {
@@ -18,8 +18,27 @@ async function checkAuth(request, config) {
   return session.timeout > Date.now();
 }
 
+function formatBytes(bytes, decimals = 2) {
+  if (bytes === 0) return '0 B';
+
+  const k = 1024;
+  const dm = decimals < 0 ? 0 : decimals;
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+}
+
 export async function onRequest(context) {
   const request = context.request;
+
+  const CORS_HEADERS = {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Content-Type': 'application/json'
+  };
 
   if (request.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: CORS_HEADERS });
@@ -30,14 +49,20 @@ export async function onRequest(context) {
     const configData = await store.get('config.json').catch(() => null);
 
     if (!configData) {
-      return ERROR_RESPONSE(10404, '系统未初始化');
+      return new Response(JSON.stringify({ code: 10404, info: '系统未初始化' }), {
+        status: 404,
+        headers: CORS_HEADERS
+      });
     }
 
     const config = JSON.parse(configData);
     const isLogin = await checkAuth(request, config);
 
     if (!isLogin) {
-      return UNAUTHORIZED_RESPONSE();
+      return new Response(JSON.stringify({ code: 10401, info: '未经授权' }), {
+        status: 401,
+        headers: CORS_HEADERS
+      });
     }
 
     const url = new URL(request.url);
@@ -52,7 +77,10 @@ export async function onRequest(context) {
         const file = formData.get('file');
 
         if (!file) {
-          return ERROR_RESPONSE(10400, '没有文件');
+          return new Response(JSON.stringify({ code: 10400, info: '没有文件' }), {
+            status: 400,
+            headers: CORS_HEADERS
+          });
         }
 
         fileData = await file.arrayBuffer();
@@ -63,7 +91,10 @@ export async function onRequest(context) {
         const { data, name, type } = body;
 
         if (!data) {
-          return ERROR_RESPONSE(10400, '没有文件数据');
+          return new Response(JSON.stringify({ code: 10400, info: '没有文件数据' }), {
+            status: 400,
+            headers: CORS_HEADERS
+          });
         }
 
         const base64Data = data.replace(/^data:image\/\w+;base64,/, '');
@@ -78,7 +109,10 @@ export async function onRequest(context) {
       ];
 
       if (!allowedTypes.includes(fileType)) {
-        return ERROR_RESPONSE(10400, '不支持的文件格式');
+        return new Response(JSON.stringify({ code: 10400, info: '不支持的文件格式' }), {
+          status: 400,
+          headers: CORS_HEADERS
+        });
       }
 
       const timestamp = Date.now();
@@ -93,7 +127,9 @@ export async function onRequest(context) {
 
       const imageUrl = `/media/${new Date().toISOString().substring(0, 7)}/${newFileName}`;
 
-      return SUCCESS_RESPONSE({
+      return new Response(JSON.stringify({
+        code: 10200,
+        info: 'success',
         url: imageUrl,
         name: `${timestamp}${random}`,
         ext: ext,
@@ -104,6 +140,9 @@ export async function onRequest(context) {
           resolution: 'unknown',
           size: formatBytes(fileData.byteLength)
         }
+      }), {
+        status: 200,
+        headers: CORS_HEADERS
       });
     }
 
@@ -112,7 +151,10 @@ export async function onRequest(context) {
       const { data } = body;
 
       if (!data) {
-        return ERROR_RESPONSE(10400, '没有文件数据');
+        return new Response(JSON.stringify({ code: 10400, info: '没有文件数据' }), {
+          status: 400,
+          headers: CORS_HEADERS
+        });
       }
 
       const base64Data = data.replace(/^data:image\/\w+;base64,/, '');
@@ -126,23 +168,20 @@ export async function onRequest(context) {
       config.cache = Date.now();
       await store.put('config.json', JSON.stringify(config, null, 2));
 
-      return SUCCESS_RESPONSE({ url: `/${filePath}` });
+      return new Response(JSON.stringify({ code: 10200, info: 'success', url: `/${filePath}` }), {
+        status: 200,
+        headers: CORS_HEADERS
+      });
     }
 
-    return ERROR_RESPONSE(10400, '未知操作');
+    return new Response(JSON.stringify({ code: 10400, info: '未知操作' }), {
+      status: 400,
+      headers: CORS_HEADERS
+    });
   } catch (error) {
-    return ERROR_RESPONSE(10500, '上传失败: ' + error.message);
+    return new Response(JSON.stringify({ code: 10500, info: '上传失败: ' + error.message }), {
+      status: 500,
+      headers: CORS_HEADERS
+    });
   }
-}
-
-function formatBytes(bytes, decimals = 2) {
-  if (bytes === 0) return '0 B';
-
-  const k = 1024;
-  const dm = decimals < 0 ? 0 : decimals;
-  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
 }

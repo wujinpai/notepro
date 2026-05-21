@@ -1,7 +1,7 @@
-import { CORS_HEADERS, SUCCESS_RESPONSE, ERROR_RESPONSE, UNAUTHORIZED_RESPONSE } from '../_shared.js';
+import { getBucket } from '@edgeone/pages-blob';
 
 function getStore(bucketName = 'notepro') {
-  return __STATIC_CONTENT.bucket(bucketName);
+  return getBucket(bucketName);
 }
 
 async function checkAuth(request, config) {
@@ -21,6 +21,13 @@ async function checkAuth(request, config) {
 export async function onRequest(context) {
   const request = context.request;
 
+  const CORS_HEADERS = {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Content-Type': 'application/json'
+  };
+
   if (request.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: CORS_HEADERS });
   }
@@ -30,7 +37,10 @@ export async function onRequest(context) {
     const configData = await store.get('config.json').catch(() => null);
 
     if (!configData) {
-      return ERROR_RESPONSE(10404, '系统未初始化');
+      return new Response(JSON.stringify({ code: 10404, info: '系统未初始化' }), {
+        status: 404,
+        headers: CORS_HEADERS
+      });
     }
 
     const config = JSON.parse(configData);
@@ -93,11 +103,17 @@ export async function onRequest(context) {
         }
       }
 
-      return SUCCESS_RESPONSE({ data: result });
+      return new Response(JSON.stringify({ code: 10200, info: 'success', data: result }), {
+        status: 200,
+        headers: CORS_HEADERS
+      });
     }
 
     if (!isLogin) {
-      return UNAUTHORIZED_RESPONSE();
+      return new Response(JSON.stringify({ code: 10401, info: '未经授权' }), {
+        status: 401,
+        headers: CORS_HEADERS
+      });
     }
 
     const body = await request.json().catch(() => ({}));
@@ -131,7 +147,10 @@ export async function onRequest(context) {
       });
       await store.put('posts.json', JSON.stringify(posts, null, 2));
 
-      return SUCCESS_RESPONSE({}, '重命名成功');
+      return new Response(JSON.stringify({ code: 10200, info: '重命名成功' }), {
+        status: 200,
+        headers: CORS_HEADERS
+      });
     }
 
     if (mode === 'hidden') {
@@ -140,13 +159,19 @@ export async function onRequest(context) {
 
       const tagIndex = tags.findIndex(t => t.name === tag);
       if (tagIndex === -1) {
-        return ERROR_RESPONSE(10404, '标签不存在');
+        return new Response(JSON.stringify({ code: 10404, info: '标签不存在' }), {
+          status: 404,
+          headers: CORS_HEADERS
+        });
       }
 
       tags[tagIndex].hidden = tags[tagIndex].hidden ? 0 : 1;
       await store.put('tags.json', JSON.stringify(tags, null, 2));
 
-      return SUCCESS_RESPONSE({ data: tags[tagIndex].hidden }, '切换成功');
+      return new Response(JSON.stringify({ code: 10200, info: '切换成功', data: tags[tagIndex].hidden }), {
+        status: 200,
+        headers: CORS_HEADERS
+      });
     }
 
     if (mode === 'delete') {
@@ -161,11 +186,20 @@ export async function onRequest(context) {
       posts = posts.filter(p => p.tag !== tag);
       await store.put('posts.json', JSON.stringify(posts, null, 2));
 
-      return SUCCESS_RESPONSE({}, '删除成功');
+      return new Response(JSON.stringify({ code: 10200, info: '删除成功' }), {
+        status: 200,
+        headers: CORS_HEADERS
+      });
     }
 
-    return ERROR_RESPONSE(10400, '未知操作');
+    return new Response(JSON.stringify({ code: 10400, info: '未知操作' }), {
+      status: 400,
+      headers: CORS_HEADERS
+    });
   } catch (error) {
-    return ERROR_RESPONSE(10500, '请求失败: ' + error.message);
+    return new Response(JSON.stringify({ code: 10500, info: '请求失败: ' + error.message }), {
+      status: 500,
+      headers: CORS_HEADERS
+    });
   }
 }

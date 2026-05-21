@@ -1,7 +1,7 @@
-import { CORS_HEADERS, SUCCESS_RESPONSE, ERROR_RESPONSE, UNAUTHORIZED_RESPONSE } from '../_shared.js';
+import { getBucket } from '@edgeone/pages-blob';
 
 function getStore(bucketName = 'notepro') {
-  return __STATIC_CONTENT.bucket(bucketName);
+  return getBucket(bucketName);
 }
 
 async function checkAuth(request, config) {
@@ -21,6 +21,13 @@ async function checkAuth(request, config) {
 export async function onRequest(context) {
   const request = context.request;
 
+  const CORS_HEADERS = {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Content-Type': 'application/json'
+  };
+
   if (request.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: CORS_HEADERS });
   }
@@ -30,7 +37,10 @@ export async function onRequest(context) {
     const configData = await store.get('config.json').catch(() => null);
 
     if (!configData) {
-      return ERROR_RESPONSE(10404, '系统未初始化');
+      return new Response(JSON.stringify({ code: 10404, info: '系统未初始化' }), {
+        status: 404,
+        headers: CORS_HEADERS
+      });
     }
 
     const config = JSON.parse(configData);
@@ -52,9 +62,14 @@ export async function onRequest(context) {
       const mode = parseInt(url.searchParams.get('mode') || '0');
 
       if (!isLogin && config.siteVisibility === 'private') {
-        return SUCCESS_RESPONSE({
+        return new Response(JSON.stringify({
+          code: 10200,
+          info: 'success',
           data: [],
           pagination: { public: '1' }
+        }), {
+          status: 200,
+          headers: CORS_HEADERS
         });
       }
 
@@ -131,7 +146,12 @@ export async function onRequest(context) {
           sorted.sort((a, b) => a.date.localeCompare(b.date));
           break;
         case 3:
-          if (!isLogin) return UNAUTHORIZED_RESPONSE();
+          if (!isLogin) {
+            return new Response(JSON.stringify({ code: 10401, info: '未经授权' }), {
+              status: 401,
+              headers: CORS_HEADERS
+            });
+          }
           sorted.sort((a, b) => {
             if (b.hidden !== a.hidden) return (b.hidden || 0) - (a.hidden || 0);
             return b.id - a.id;
@@ -172,7 +192,9 @@ export async function onRequest(context) {
         is_hidden: config.postHiddenTip
       }));
 
-      return SUCCESS_RESPONSE({
+      return new Response(JSON.stringify({
+        code: 10200,
+        info: 'success',
         data: result,
         pagination: {
           current_page: page + 1,
@@ -183,13 +205,19 @@ export async function onRequest(context) {
           has_next: !continueData && page + 1 < totalPages,
           avg: id ? (continueData ? config.viewRange : 0) : -1
         }
+      }), {
+        status: 200,
+        headers: CORS_HEADERS
       });
     }
 
     const isLogin = await checkAuth(request, config);
 
     if (!isLogin) {
-      return UNAUTHORIZED_RESPONSE();
+      return new Response(JSON.stringify({ code: 10401, info: '未经授权' }), {
+        status: 401,
+        headers: CORS_HEADERS
+      });
     }
 
     if (action === 'new') {
@@ -225,7 +253,10 @@ export async function onRequest(context) {
       await updateTag(store, finalTag, 1, parseInt(hidden));
       await updateCalendar(store, finalDate.substring(0, 7), parseInt(finalDate.split('-')[2]));
 
-      return SUCCESS_RESPONSE({ id: newId }, '创建成功');
+      return new Response(JSON.stringify({ code: 10200, info: '创建成功', id: newId }), {
+        status: 200,
+        headers: CORS_HEADERS
+      });
     }
 
     if (action === 'update') {
@@ -237,7 +268,10 @@ export async function onRequest(context) {
       const postIndex = posts.findIndex(p => p.id === parseInt(id));
 
       if (postIndex === -1) {
-        return ERROR_RESPONSE(10404, '文章不存在');
+        return new Response(JSON.stringify({ code: 10404, info: '文章不存在' }), {
+          status: 404,
+          headers: CORS_HEADERS
+        });
       }
 
       const oldPost = posts[postIndex];
@@ -270,7 +304,10 @@ export async function onRequest(context) {
 
       await store.put('posts.json', JSON.stringify(posts, null, 2));
 
-      return SUCCESS_RESPONSE({}, '更新成功');
+      return new Response(JSON.stringify({ code: 10200, info: '更新成功' }), {
+        status: 200,
+        headers: CORS_HEADERS
+      });
     }
 
     if (action === 'delete') {
@@ -282,7 +319,10 @@ export async function onRequest(context) {
       const postIndex = posts.findIndex(p => p.id === parseInt(id));
 
       if (postIndex === -1) {
-        return ERROR_RESPONSE(10404, '文章不存在');
+        return new Response(JSON.stringify({ code: 10404, info: '文章不存在' }), {
+          status: 404,
+          headers: CORS_HEADERS
+        });
       }
 
       const deletedPost = posts[postIndex];
@@ -292,12 +332,21 @@ export async function onRequest(context) {
       await updateTag(store, deletedPost.tag, -1, deletedPost.hidden ? 0 : -1);
       await updateCalendar(store, deletedPost.date.substring(0, 7), parseInt(deletedPost.date.split('-')[2]), -1);
 
-      return SUCCESS_RESPONSE({}, '删除成功');
+      return new Response(JSON.stringify({ code: 10200, info: '删除成功' }), {
+        status: 200,
+        headers: CORS_HEADERS
+      });
     }
 
-    return ERROR_RESPONSE(10400, '未知操作');
+    return new Response(JSON.stringify({ code: 10400, info: '未知操作' }), {
+      status: 400,
+      headers: CORS_HEADERS
+    });
   } catch (error) {
-    return ERROR_RESPONSE(10500, '请求失败: ' + error.message);
+    return new Response(JSON.stringify({ code: 10500, info: '请求失败: ' + error.message }), {
+      status: 500,
+      headers: CORS_HEADERS
+    });
   }
 }
 
@@ -331,7 +380,6 @@ async function updateCalendar(store, yearMonth, day, mode = 1) {
   let calendar = JSON.parse(calendarData);
 
   if (!calendar[yearMonth]) {
-    const daysInMonth = new Date(yearMonth + '-01');
     calendar[yearMonth] = {};
     for (let i = 1; i <= 31; i++) {
       calendar[yearMonth][i] = 0;

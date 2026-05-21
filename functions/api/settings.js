@@ -1,7 +1,7 @@
-import { CORS_HEADERS, SUCCESS_RESPONSE, ERROR_RESPONSE, UNAUTHORIZED_RESPONSE } from '../_shared.js';
+import { getBucket } from '@edgeone/pages-blob';
 
 function getStore(bucketName = 'notepro') {
-  return __STATIC_CONTENT.bucket(bucketName);
+  return getBucket(bucketName);
 }
 
 async function checkAuth(request, config) {
@@ -18,8 +18,36 @@ async function checkAuth(request, config) {
   return session.timeout > Date.now();
 }
 
+async function sha256(message) {
+  const msgBuffer = new TextEncoder().encode(message);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function generateSalt() {
+  const array = new Uint8Array(16);
+  crypto.getRandomValues(array);
+  return Array.from(array, b => b.toString(16).padStart(2, '0')).join('');
+}
+
+function generateUID() {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    const r = Math.random() * 16 | 0;
+    const v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+}
+
 export async function onRequest(context) {
   const request = context.request;
+
+  const CORS_HEADERS = {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Content-Type': 'application/json'
+  };
 
   if (request.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: CORS_HEADERS });
@@ -30,7 +58,10 @@ export async function onRequest(context) {
     const configData = await store.get('config.json').catch(() => null);
 
     if (!configData) {
-      return ERROR_RESPONSE(10404, '系统未初始化');
+      return new Response(JSON.stringify({ code: 10404, info: '系统未初始化' }), {
+        status: 404,
+        headers: CORS_HEADERS
+      });
     }
 
     const config = JSON.parse(configData);
@@ -40,10 +71,15 @@ export async function onRequest(context) {
 
     if (action === 'get') {
       if (!isLogin) {
-        return UNAUTHORIZED_RESPONSE();
+        return new Response(JSON.stringify({ code: 10401, info: '未经授权' }), {
+          status: 401,
+          headers: CORS_HEADERS
+        });
       }
 
-      return SUCCESS_RESPONSE({
+      return new Response(JSON.stringify({
+        code: 10200,
+        info: 'success',
         data: {
           siteTitle: config.siteTitle,
           siteDescription: config.siteDescription,
@@ -93,11 +129,17 @@ export async function onRequest(context) {
           uid: config.uid,
           version: config.version
         }
+      }), {
+        status: 200,
+        headers: CORS_HEADERS
       });
     }
 
     if (!isLogin) {
-      return UNAUTHORIZED_RESPONSE();
+      return new Response(JSON.stringify({ code: 10401, info: '未经授权' }), {
+        status: 401,
+        headers: CORS_HEADERS
+      });
     }
 
     if (action === 'update') {
@@ -105,21 +147,21 @@ export async function onRequest(context) {
       const { key, value } = body;
 
       if (!key) {
-        return ERROR_RESPONSE(10400, '缺少参数');
+        return new Response(JSON.stringify({ code: 10400, info: '缺少参数' }), {
+          status: 400,
+          headers: CORS_HEADERS
+        });
       }
 
-      const sensitiveKeys = ['locationApiKey', 'weatherApiKey', 'passHash', 'passSalt'];
-      if (sensitiveKeys.includes(key)) {
-        config[key] = value;
-      } else {
-        config[key] = value;
-      }
-
+      config[key] = value;
       config.cache = Date.now();
 
       await store.put('config.json', JSON.stringify(config, null, 2));
 
-      return SUCCESS_RESPONSE({}, '更新成功');
+      return new Response(JSON.stringify({ code: 10200, info: '更新成功' }), {
+        status: 200,
+        headers: CORS_HEADERS
+      });
     }
 
     if (action === 'updatePassword') {
@@ -127,17 +169,26 @@ export async function onRequest(context) {
       const { oldPassword, newPassword } = body;
 
       if (!oldPassword || !newPassword) {
-        return ERROR_RESPONSE(10400, '缺少参数');
+        return new Response(JSON.stringify({ code: 10400, info: '缺少参数' }), {
+          status: 400,
+          headers: CORS_HEADERS
+        });
       }
 
       if (newPassword.length < 4) {
-        return ERROR_RESPONSE(10401, '新密码长度不足');
+        return new Response(JSON.stringify({ code: 10401, info: '新密码长度不足' }), {
+          status: 400,
+          headers: CORS_HEADERS
+        });
       }
 
       const inputHash = await sha256(config.passSalt + oldPassword + config.passSalt);
 
       if (inputHash !== config.passHash) {
-        return ERROR_RESPONSE(10203, '原密码错误');
+        return new Response(JSON.stringify({ code: 10203, info: '原密码错误' }), {
+          status: 200,
+          headers: CORS_HEADERS
+        });
       }
 
       const newSalt = await generateSalt();
@@ -146,7 +197,10 @@ export async function onRequest(context) {
 
       await store.put('config.json', JSON.stringify(config, null, 2));
 
-      return SUCCESS_RESPONSE({}, '密码更新成功');
+      return new Response(JSON.stringify({ code: 10200, info: '密码更新成功' }), {
+        status: 200,
+        headers: CORS_HEADERS
+      });
     }
 
     if (action === 'init') {
@@ -154,7 +208,10 @@ export async function onRequest(context) {
       const { password } = body;
 
       if (!password || password.length < 4) {
-        return ERROR_RESPONSE(10401, '密码长度不足');
+        return new Response(JSON.stringify({ code: 10401, info: '密码长度不足' }), {
+          status: 400,
+          headers: CORS_HEADERS
+        });
       }
 
       const salt = await generateSalt();
@@ -168,32 +225,20 @@ export async function onRequest(context) {
 
       await store.put('config.json', JSON.stringify(config, null, 2));
 
-      return SUCCESS_RESPONSE({}, '初始化成功');
+      return new Response(JSON.stringify({ code: 10200, info: '初始化成功' }), {
+        status: 200,
+        headers: CORS_HEADERS
+      });
     }
 
-    return ERROR_RESPONSE(10400, '未知操作');
+    return new Response(JSON.stringify({ code: 10400, info: '未知操作' }), {
+      status: 400,
+      headers: CORS_HEADERS
+    });
   } catch (error) {
-    return ERROR_RESPONSE(10500, '请求失败: ' + error.message);
+    return new Response(JSON.stringify({ code: 10500, info: '请求失败: ' + error.message }), {
+      status: 500,
+      headers: CORS_HEADERS
+    });
   }
-}
-
-async function sha256(message) {
-  const msgBuffer = new TextEncoder().encode(message);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-}
-
-async function generateSalt() {
-  const array = new Uint8Array(16);
-  crypto.getRandomValues(array);
-  return Array.from(array, b => b.toString(16).padStart(2, '0')).join('');
-}
-
-function generateUID() {
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-    const r = Math.random() * 16 | 0;
-    const v = c === 'x' ? r : (r & 0x3 | 0x8);
-    return v.toString(16);
-  });
 }

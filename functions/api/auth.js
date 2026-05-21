@@ -1,7 +1,7 @@
-import { CORS_HEADERS, SUCCESS_RESPONSE, ERROR_RESPONSE, UNAUTHORIZED_RESPONSE } from '../_shared.js';
+import { getBucket } from '@edgeone/pages-blob';
 
 function getStore(bucketName = 'notepro') {
-  return __STATIC_CONTENT.bucket(bucketName);
+  return getBucket(bucketName);
 }
 
 async function sha256(message) {
@@ -20,6 +20,13 @@ async function generateToken() {
 export async function onRequest(context) {
   const request = context.request;
 
+  const CORS_HEADERS = {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Content-Type': 'application/json'
+  };
+
   if (request.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: CORS_HEADERS });
   }
@@ -29,7 +36,10 @@ export async function onRequest(context) {
     const configData = await store.get('config.json').catch(() => null);
 
     if (!configData) {
-      return ERROR_RESPONSE(10404, '系统未初始化');
+      return new Response(JSON.stringify({ code: 10404, info: '系统未初始化' }), {
+        status: 404,
+        headers: CORS_HEADERS
+      });
     }
 
     const config = JSON.parse(configData);
@@ -47,18 +57,29 @@ export async function onRequest(context) {
         if (cookies.auth_token && config.sessions && config.sessions[cookies.auth_token]) {
           const session = config.sessions[cookies.auth_token];
           if (session.timeout > Date.now()) {
-            return SUCCESS_RESPONSE({
+            return new Response(JSON.stringify({
+              code: 10200,
+              info: '已登录',
               loggedIn: true,
               timeout: session.timeout,
               token: session.csrfToken
-            }, '已登录');
+            }), {
+              status: 200,
+              headers: CORS_HEADERS
+            });
           }
         }
 
-        return SUCCESS_RESPONSE({ loggedIn: false }, '未登录');
+        return new Response(JSON.stringify({ code: 10200, info: '未登录', loggedIn: false }), {
+          status: 200,
+          headers: CORS_HEADERS
+        });
       }
 
-      return ERROR_RESPONSE(10400, '未知操作');
+      return new Response(JSON.stringify({ code: 10400, info: '未知操作' }), {
+        status: 400,
+        headers: CORS_HEADERS
+      });
     }
 
     const body = await request.json().catch(() => ({}));
@@ -66,13 +87,19 @@ export async function onRequest(context) {
 
     if (action === 'login') {
       if (!password || password.length < 4) {
-        return ERROR_RESPONSE(10401, '密码长度不足或为空');
+        return new Response(JSON.stringify({ code: 10401, info: '密码长度不足或为空' }), {
+          status: 400,
+          headers: CORS_HEADERS
+        });
       }
 
       const inputHash = await sha256(config.passSalt + password + config.passSalt);
 
       if (inputHash !== config.passHash) {
-        return ERROR_RESPONSE(10203, '密码错误，请重试');
+        return new Response(JSON.stringify({ code: 10203, info: '密码错误，请重试' }), {
+          status: 200,
+          headers: CORS_HEADERS
+        });
       }
 
       const token = await generateToken();
@@ -91,7 +118,9 @@ export async function onRequest(context) {
 
       await store.put('config.json', JSON.stringify(config, null, 2));
 
-      const response = SUCCESS_RESPONSE({
+      const response = new Response(JSON.stringify({
+        code: 10200,
+        info: '登录成功',
         token: csrfToken,
         data: [
           config.pictureZip,
@@ -99,7 +128,10 @@ export async function onRequest(context) {
           config.defaultTag,
           config.cors
         ]
-      }, '登录成功');
+      }), {
+        status: 200,
+        headers: CORS_HEADERS
+      });
 
       response.headers.set('Set-Cookie',
         `auth_token=${token}; Path=/; HttpOnly; Max-Age=${config.loginTimeout || 3600}; SameSite=Lax`
@@ -119,7 +151,10 @@ export async function onRequest(context) {
         await store.put('config.json', JSON.stringify(config, null, 2));
       }
 
-      const response = SUCCESS_RESPONSE({}, '已退出登录');
+      const response = new Response(JSON.stringify({ code: 10200, info: '已退出登录' }), {
+        status: 200,
+        headers: CORS_HEADERS
+      });
       response.headers.set('Set-Cookie',
         'auth_token=; Path=/; HttpOnly; Max-Age=0; SameSite=Lax'
       );
@@ -127,8 +162,14 @@ export async function onRequest(context) {
       return response;
     }
 
-    return ERROR_RESPONSE(10400, '未知操作');
+    return new Response(JSON.stringify({ code: 10400, info: '未知操作' }), {
+      status: 400,
+      headers: CORS_HEADERS
+    });
   } catch (error) {
-    return ERROR_RESPONSE(10500, '请求失败: ' + error.message);
+    return new Response(JSON.stringify({ code: 10500, info: '请求失败: ' + error.message }), {
+      status: 500,
+      headers: CORS_HEADERS
+    });
   }
 }
