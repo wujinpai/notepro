@@ -10,7 +10,6 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@edgeone/pages-blob": "^1.0.0",
     "katex": "^0.16.9",
     "marked": "^15.0.0",
     "react": "^19.0.0",
