@@ -14,8 +14,7 @@ function jsonResponse(data, status = 200) {
 }
 
 async function updateTags(store, oldTag, newTag) {
-  const tags =
-    (await store.get("tags/index.json", { type: "json", consistency: "strong" })) || [];
+  const tags = (await store.get("tags/index.json", { type: "json", consistency: "strong" })).catch(() => []) || [];
 
   if (oldTag) {
     const oldEntry = tags.find((t) => t.name === oldTag);
@@ -45,8 +44,7 @@ async function updateCalendar(store, dateStr, delta) {
   if (!match) return;
   const [, year, month] = match;
   const key = `calendar/${year}${month}.json`;
-  const cal =
-    (await store.get(key, { type: "json", consistency: "strong" })) || {};
+  const cal = (await store.get(key, { type: "json", consistency: "strong" })).catch(() => {}) || {};
   const day = parseInt(dateStr.split("-")[2], 10);
   cal[day] = (cal[day] || 0) + delta;
   if (cal[day] <= 0) delete cal[day];
@@ -58,14 +56,13 @@ async function handleGet(request, store) {
   const id = url.searchParams.get("id");
 
   if (id) {
-    const posts =
-      (await store.get("posts/index.json", { type: "json", consistency: "strong" })) || [];
+    const posts = (await store.get("posts/index.json", { type: "json", consistency: "strong" })).catch(() => []) || [];
     const post = posts.find((p) => p.id === id);
     if (!post) return jsonResponse({ error: "Post not found" }, 404);
     return jsonResponse({ post });
   }
 
-  const posts = (await store.get("posts/index.json", { type: "json" })) || [];
+  const posts = (await store.get("posts/index.json", { type: "json" })).catch(() => []) || [];
   let filtered = posts.filter((p) => !p.hidden);
 
   const tag = url.searchParams.get("tag");
@@ -78,8 +75,8 @@ async function handleGet(request, store) {
     const lower = search.toLowerCase();
     filtered = filtered.filter(
       (p) =>
-        p.title.toLowerCase().includes(lower) ||
-        p.content.toLowerCase().includes(lower)
+        (p.title && p.title.toLowerCase().includes(lower)) ||
+        (p.content && p.content.toLowerCase().includes(lower))
     );
   }
 
@@ -109,15 +106,14 @@ async function handleGet(request, store) {
 }
 
 async function handlePost(request, store) {
-  const body = await request.json();
+  const body = await request.json().catch(() => ({}));
   const { title, content, tag, pin, hidden, weather, location, media, archive } = body;
 
   if (!title || !content) {
     return jsonResponse({ error: "Title and content are required" }, 400);
   }
 
-  const posts =
-    (await store.get("posts/index.json", { type: "json", consistency: "strong" })) || [];
+  const posts = (await store.get("posts/index.json", { type: "json", consistency: "strong" })).catch(() => []) || [];
   const now = new Date();
   const id = now.getTime().toString(36) + Math.random().toString(36).slice(2, 8);
   const date = now.toISOString();
@@ -149,15 +145,14 @@ async function handlePost(request, store) {
 }
 
 async function handlePut(request, store) {
-  const body = await request.json();
+  const body = await request.json().catch(() => ({}));
   const { id, title, content, tag, pin, hidden, weather, location, media, archive } = body;
 
   if (!id) {
     return jsonResponse({ error: "Post id is required" }, 400);
   }
 
-  const posts =
-    (await store.get("posts/index.json", { type: "json", consistency: "strong" })) || [];
+  const posts = (await store.get("posts/index.json", { type: "json", consistency: "strong" })).catch(() => []) || [];
   const index = posts.findIndex((p) => p.id === id);
   if (index === -1) {
     return jsonResponse({ error: "Post not found" }, 404);
@@ -197,8 +192,7 @@ async function handleDelete(request, store) {
     return jsonResponse({ error: "Post id is required" }, 400);
   }
 
-  const posts =
-    (await store.get("posts/index.json", { type: "json", consistency: "strong" })) || [];
+  const posts = (await store.get("posts/index.json", { type: "json", consistency: "strong" })).catch(() => []) || [];
   const index = posts.findIndex((p) => p.id === id);
   if (index === -1) {
     return jsonResponse({ error: "Post not found" }, 404);
@@ -218,7 +212,8 @@ async function handleDelete(request, store) {
   return jsonResponse({ success: true, deleted });
 }
 
-export async function onRequest({ request }) {
+export async function onRequest(context) {
+  const request = context.request;
   if (request.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: CORS_HEADERS });
   }
