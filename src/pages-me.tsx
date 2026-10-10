@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, fmtTime, type NoteInfo, type SiteInfo, type UserInfo } from "./api";
-import { Avatar, SliderCaptcha } from "./components";
+import { Avatar, Modal, SliderCaptcha } from "./components";
+import { excerpt, renderMarkdown } from "./md";
 
 interface SessionRow { id: number; ua: string; ip: string; created_at: number; current: boolean }
 interface Binding { provider: string; provider_nickname: string; provider_avatar: string; created_at: number }
@@ -30,7 +31,7 @@ export function MePage({ user, site, refreshUser, onEditNote, onOpenNote }: {
       </aside>
       <section className="me-main">
         {tab === "profile" && <ProfileTab user={user} refreshUser={refreshUser} />}
-        {tab === "security" && <SecurityTab user={user} />}
+        {tab === "security" && <SecurityTab user={user} refreshUser={refreshUser} />}
         {tab === "notes" && <MyNotesTab onEditNote={onEditNote} onOpenNote={onOpenNote} />}
         {tab === "accounts" && <AccountsTab site={site} />}
       </section>
@@ -68,7 +69,7 @@ function ProfileTab({ user, refreshUser }: { user: UserInfo; refreshUser: () => 
         </div>
         <div>
           <p className="muted tiny">方形预览，确认后上传。支持 PNG/JPG/GIF/WebP，最大 5MB。</p>
-          <div className="row-gap">
+          <div className="avatar-actions">
             <button className="btn btn-ghost" onClick={() => fileRef.current?.click()}>选择图片</button>
             <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/gif,image/webp" hidden
               onChange={(e) => { const f = e.target.files?.[0]; if (f) pick(f); e.target.value = ""; }} />
@@ -93,7 +94,7 @@ function CodeBox({ onSend, busy, left, label }: { onSend: () => void; busy: bool
   return <button type="button" className="btn btn-ghost" disabled={busy || left > 0} onClick={onSend}>{left > 0 ? `${left}s` : label}</button>;
 }
 
-function SecurityTab({ user }: { user: UserInfo }) {
+function BindEmailModal({ user, onClose, onDone }: { user: UserInfo; onClose: () => void; onDone: () => void }) {
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
   const [password, setPassword] = useState("");
@@ -101,78 +102,102 @@ function SecurityTab({ user }: { user: UserInfo }) {
   const [sliderKey, setSliderKey] = useState(0);
   const [left, setLeft] = useState(0);
   const [msg, setMsg] = useState("");
-  const [pwCode, setPwCode] = useState("");
-  const [newPw, setNewPw] = useState("");
-  const [pwTicket, setPwTicket] = useState("");
-  const [pwSliderKey, setPwSliderKey] = useState(0);
-  const [pwLeft, setPwLeft] = useState(0);
-  const [pwMsg, setPwMsg] = useState("");
-  const [sessions, setSessions] = useState<SessionRow[]>([]);
-
   useEffect(() => { const t = left > 0 ? setTimeout(() => setLeft(left - 1), 1000) : undefined; return () => clearTimeout(t); }, [left]);
-  useEffect(() => { const t = pwLeft > 0 ? setTimeout(() => setPwLeft(pwLeft - 1), 1000) : undefined; return () => clearTimeout(t); }, [pwLeft]);
-
-  const loadSessions = useCallback(() => {
-    api.get<{ sessions: SessionRow[] }>("/api/me/sessions").then((d) => setSessions(d.sessions)).catch(() => setSessions([]));
-  }, []);
-  useEffect(() => { loadSessions(); }, [loadSessions]);
-
   const sendBindCode = async () => {
     if (!ticket) { setMsg("请先完成滑块验证"); return; }
     try { await api.post("/api/me/send-bind-code", { email: email.trim(), ticket }); setLeft(60); setTicket(""); setSliderKey((k) => k + 1); setMsg("验证码已发送"); }
     catch (e) { setMsg((e as Error).message); }
   };
   const bind = async () => {
-    try { await api.post("/api/me/bind-email", { email: email.trim(), code: code.trim(), password }); setMsg("邮箱已更新，刷新页面后生效"); }
+    try { await api.post("/api/me/bind-email", { email: email.trim(), code: code.trim(), password }); setMsg("邮箱已更新"); onDone(); }
     catch (e) { setMsg((e as Error).message); }
   };
+  return (
+    <Modal title={user.email ? "换绑邮箱" : "绑定邮箱"} onClose={onClose}>
+      <p className="muted tiny">当前邮箱：{user.email || "未绑定"}。换绑需要当前密码（纯第三方登录账号免填）+ 新邮箱验证码。</p>
+      <div className="form">
+        <label>新邮箱<input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="新邮箱地址" /></label>
+        <label>当前密码{user.hasPassword === false && "（第三方账号可留空）"}<input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="当前密码" /></label>
+        <label>新邮箱验证码
+          <span className="code-row">
+            <input value={code} onChange={(e) => setCode(e.target.value)} placeholder="6 位验证码" inputMode="numeric" />
+            <CodeBox onSend={() => void sendBindCode()} busy={false} left={left} label="发送验证码" />
+          </span>
+        </label>
+      </div>
+      <SliderCaptcha resetKey={sliderKey} onTicket={setTicket} />
+      {msg && <p className="ok-text">{msg}</p>}
+      <button className="btn btn-primary btn-block" onClick={() => void bind()}>确认{user.email ? "换绑" : "绑定"}</button>
+    </Modal>
+  );
+}
+
+function ChangePwModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+  const [pwCode, setPwCode] = useState("");
+  const [newPw, setNewPw] = useState("");
+  const [pwTicket, setPwTicket] = useState("");
+  const [pwSliderKey, setPwSliderKey] = useState(0);
+  const [pwLeft, setPwLeft] = useState(0);
+  const [pwMsg, setPwMsg] = useState("");
+  useEffect(() => { const t = pwLeft > 0 ? setTimeout(() => setPwLeft(pwLeft - 1), 1000) : undefined; return () => clearTimeout(t); }, [pwLeft]);
   const sendPwCode = async () => {
     if (!pwTicket) { setPwMsg("请先完成滑块验证"); return; }
     try { const d = await api.post<{ emailMasked: string }>("/api/me/send-changepw-code", { ticket: pwTicket }); setPwLeft(60); setPwTicket(""); setPwSliderKey((k) => k + 1); setPwMsg(`验证码已发送至 ${d.emailMasked}`); }
     catch (e) { setPwMsg((e as Error).message); }
   };
   const changePw = async () => {
-    try { await api.post("/api/me/change-password", { code: pwCode.trim(), newPassword: newPw }); setPwMsg("密码已修改，其他设备需重新登录"); loadSessions(); }
+    try { await api.post("/api/me/change-password", { code: pwCode.trim(), newPassword: newPw }); setPwMsg("密码已修改，其他设备需重新登录"); onDone(); }
     catch (e) { setPwMsg((e as Error).message); }
   };
+  return (
+    <Modal title="修改密码" onClose={onClose}>
+      <p className="muted tiny">通过邮箱验证码修改，不需要记得原密码。</p>
+      <div className="form">
+        <label>邮箱验证码
+          <span className="code-row">
+            <input value={pwCode} onChange={(e) => setPwCode(e.target.value)} placeholder="6 位验证码" inputMode="numeric" />
+            <CodeBox onSend={() => void sendPwCode()} busy={false} left={pwLeft} label="发送验证码" />
+          </span>
+        </label>
+        <label>新密码<input type="password" value={newPw} onChange={(e) => setNewPw(e.target.value)} placeholder="至少 6 位" /></label>
+      </div>
+      <SliderCaptcha resetKey={pwSliderKey} onTicket={setPwTicket} />
+      {pwMsg && <p className="ok-text">{pwMsg}</p>}
+      <button className="btn btn-primary btn-block" onClick={() => void changePw()}>修改密码</button>
+    </Modal>
+  );
+}
+
+function SecurityTab({ user, refreshUser }: { user: UserInfo; refreshUser: () => void }) {
+  const [dialog, setDialog] = useState<"bind" | "pw" | null>(null);
+  const [sessions, setSessions] = useState<SessionRow[]>([]);
+
+  const loadSessions = useCallback(() => {
+    api.get<{ sessions: SessionRow[] }>("/api/me/sessions").then((d) => setSessions(d.sessions)).catch(() => setSessions([]));
+  }, []);
+  useEffect(() => { loadSessions(); }, [loadSessions]);
+
   const revoke = async (id: number) => { await api.del(`/api/me/sessions/${id}`); loadSessions(); };
   const killOthers = async () => { await api.post("/api/me/sessions/others"); loadSessions(); };
 
   return (
     <div className="stack">
       <div className="panel">
-        <h3>{user.email ? "换绑邮箱" : "绑定邮箱"}</h3>
-        <p className="muted tiny">当前邮箱：{user.email || "未绑定"}。换绑需要当前密码（纯第三方登录账号免填）+ 新邮箱验证码。</p>
-        <div className="form">
-          <label>新邮箱<input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="新邮箱地址" /></label>
-          <label>当前密码{user.hasPassword === false && "（第三方账号可留空）"}<input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="当前密码" /></label>
-          <label>新邮箱验证码
-            <span className="code-row">
-              <input value={code} onChange={(e) => setCode(e.target.value)} placeholder="6 位验证码" inputMode="numeric" />
-              <CodeBox onSend={() => void sendBindCode()} busy={false} left={left} label="发送验证码" />
-            </span>
-          </label>
+        <h3>账号安全</h3>
+        <div className="session-row">
+          <div>
+            <strong>邮箱</strong>
+            <div className="muted tiny">{user.email ? `当前邮箱：${user.email}` : "尚未绑定邮箱"}</div>
+          </div>
+          <button className="btn btn-ghost btn-sm" onClick={() => setDialog("bind")}>{user.email ? "换绑邮箱" : "绑定邮箱"}</button>
         </div>
-        <SliderCaptcha resetKey={sliderKey} onTicket={setTicket} />
-        {msg && <p className="ok-text">{msg}</p>}
-        <button className="btn btn-primary" onClick={() => void bind()}>确认{user.email ? "换绑" : "绑定"}</button>
-      </div>
-
-      <div className="panel">
-        <h3>修改密码</h3>
-        <p className="muted tiny">通过邮箱验证码修改，不需要记得原密码。{user.email ? "" : "你尚未绑定邮箱，请先在上方绑定。"}</p>
-        <div className="form">
-          <label>邮箱验证码
-            <span className="code-row">
-              <input value={pwCode} onChange={(e) => setPwCode(e.target.value)} placeholder="6 位验证码" inputMode="numeric" />
-              <CodeBox onSend={() => void sendPwCode()} busy={false} left={pwLeft} label="发送验证码" />
-            </span>
-          </label>
-          <label>新密码<input type="password" value={newPw} onChange={(e) => setNewPw(e.target.value)} placeholder="至少 6 位" /></label>
+        <div className="session-row">
+          <div>
+            <strong>密码</strong>
+            <div className="muted tiny">通过邮箱验证码修改，不需要记得原密码</div>
+          </div>
+          <button className="btn btn-ghost btn-sm" disabled={!user.email} title={user.email ? "" : "请先绑定邮箱"} onClick={() => setDialog("pw")}>修改密码</button>
         </div>
-        <SliderCaptcha resetKey={pwSliderKey} onTicket={setPwTicket} />
-        {pwMsg && <p className="ok-text">{pwMsg}</p>}
-        <button className="btn btn-primary" onClick={() => void changePw()}>修改密码</button>
       </div>
 
       <div className="panel">
@@ -189,6 +214,8 @@ function SecurityTab({ user }: { user: UserInfo }) {
         ))}
         {sessions.length > 1 && <button className="btn btn-ghost" onClick={() => void killOthers()}>下线其他全部设备</button>}
       </div>
+      {dialog === "bind" && <BindEmailModal user={user} onClose={() => setDialog(null)} onDone={refreshUser} />}
+      {dialog === "pw" && <ChangePwModal onClose={() => setDialog(null)} onDone={loadSessions} />}
     </div>
   );
 }
@@ -220,12 +247,17 @@ function MyNotesTab({ onEditNote, onOpenNote }: { onEditNote: (n: NoteInfo) => v
       </div>
       {notes.length === 0 && <p className="muted tiny">暂无笔记</p>}
       {notes.map((n) => (
-        <div key={n.id} className="my-note-row">
-          <button className="my-note-title" onClick={() => onOpenNote(n)}>
-            {n.pinned ? "📌 " : ""}{n.title || n.content.slice(0, 40) || "（无内容）"}
-            <span className="muted tiny"> · {fmtTime(n.createdAt)}</span>
-          </button>
-          <span className="badge">{n.archived ? "归档" : n.visibility === "private" ? "私密" : "公开"}</span>
+        <div key={n.id} className="my-note-item">
+          <div className="my-note-head">
+            <button className="my-note-title" onClick={() => onOpenNote(n)}>
+              {n.title || excerpt(n.content, 48) || "（无内容）"}
+            </button>
+            {n.pinned && <span className="badge badge-pin">置顶</span>}
+            <span className="badge">{n.archived ? "归档" : n.visibility === "private" ? "私密" : "公开"}</span>
+            <span className="muted tiny">{fmtTime(n.createdAt)}</span>
+          </div>
+          <div className="my-note-preview markdown" onClick={() => onOpenNote(n)}
+            dangerouslySetInnerHTML={{ __html: renderMarkdown(n.content) }} />
           <div className="row-gap">
             <button className="btn btn-ghost btn-sm" onClick={() => onEditNote(n)}>编辑</button>
             {n.visibility === "private"

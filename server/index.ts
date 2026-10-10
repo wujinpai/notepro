@@ -49,11 +49,12 @@ app.get("/api/site", (req, res) => {
   const oauth: string[] = [];
   for (const p of PROVIDERS) if (getProviderConfig(p).enabled && getSetting("oauth_show_login", "1") === "1") oauth.push(p);
   ok(res, {
-    name: getSetting("site_name", "NotePro"),
-    subtitle: getSetting("site_subtitle", "多用户笔记广场"),
-    description: getSetting("site_description", "NotePro 多用户笔记广场：记录、分享与发现。"),
-    keywords: getSetting("site_keywords", "笔记,博客,NotePro"),
+    name: getSetting("site_name", "己素"),
+    subtitle: getSetting("site_subtitle", "Jisu"),
+    description: getSetting("site_description", "己素 Jisu：多用户笔记广场，记录、分享与发现。"),
+    keywords: getSetting("site_keywords", "笔记,博客,己素,Jisu"),
     footer: getSetting("site_footer", ""),
+    icp: getSetting("site_icp", "黔ICP备2026016351号-1"),
     logo: getSetting("site_logo", ""),
     registerOpen: getSetting("site_register_open", "1") === "1",
     oauthProviders: oauth,
@@ -522,9 +523,10 @@ app.post("/api/admin/notes/:id/takedown", requireAdmin, (req, res) => {
 
 app.get("/api/admin/site", requireAdmin, (_req, res) => {
   ok(res, {
-    name: getSetting("site_name", "NotePro"), subtitle: getSetting("site_subtitle", ""),
+    name: getSetting("site_name", "己素"), subtitle: getSetting("site_subtitle", "Jisu"),
     description: getSetting("site_description", ""), keywords: getSetting("site_keywords", ""),
-    footer: getSetting("site_footer", ""), logo: getSetting("site_logo", ""), url: getSetting("site_url", ""),
+    footer: getSetting("site_footer", ""), icp: getSetting("site_icp", "黔ICP备2026016351号-1"),
+    logo: getSetting("site_logo", ""), url: getSetting("site_url", ""),
     registerOpen: getSetting("site_register_open", "1") === "1",
     oauthShowLogin: getSetting("oauth_show_login", "1") === "1",
   });
@@ -532,11 +534,12 @@ app.get("/api/admin/site", requireAdmin, (_req, res) => {
 app.put("/api/admin/site", requireAdmin, (req, res) => {
   const b = req.body || {};
   const str = (k: string, max: number) => String(b[k] ?? "").slice(0, max);
-  setSetting("site_name", str("name", 60) || "NotePro");
+  setSetting("site_name", str("name", 60) || "己素");
   setSetting("site_subtitle", str("subtitle", 120));
   setSetting("site_description", str("description", 300));
   setSetting("site_keywords", str("keywords", 200));
   setSetting("site_footer", str("footer", 300));
+  setSetting("site_icp", str("icp", 60));
   setSetting("site_url", str("url", 200).replace(/\/$/, ""));
   setSetting("site_register_open", b.registerOpen === false ? "0" : "1");
   setSetting("oauth_show_login", b.oauthShowLogin === false ? "0" : "1");
@@ -568,7 +571,7 @@ app.post("/api/admin/smtp/test", requireAdmin, async (req, res) => {
   if (!cfg) return fail(res, 400, "尚未配置可用的 SMTP（后台启用并填写主机与账号，或提供环境变量）");
   const to = String(req.body?.to || authedUser(req).email || "");
   if (!EMAIL_RE.test(to)) return fail(res, 400, "请填写有效的测试收件邮箱");
-  const r = await sendMail(to, `${cfg.fromName || getSetting("site_name", "NotePro")} · 测试邮件`, "这是一封 SMTP 配置测试邮件，收到即表示发信配置可用。");
+  const r = await sendMail(to, `${cfg.fromName || getSetting("site_name", "己素")} · 测试邮件`, "这是一封 SMTP 配置测试邮件，收到即表示发信配置可用。");
   if (!r.ok) return fail(res, 502, `测试邮件发送失败：${r.error}`);
   ok(res, { to });
 });

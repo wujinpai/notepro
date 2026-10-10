@@ -134,7 +134,7 @@ function NotesAdmin() {
 }
 
 function SiteSettings() {
-  const [f, setF] = useState({ name: "", subtitle: "", description: "", keywords: "", footer: "", logo: "", url: "", registerOpen: true, oauthShowLogin: true });
+  const [f, setF] = useState({ name: "", subtitle: "", description: "", keywords: "", footer: "", icp: "", logo: "", url: "", registerOpen: true, oauthShowLogin: true });
   const [msg, setMsg] = useState("");
   useEffect(() => { api.get<typeof f>("/api/admin/site").then(setF).catch(() => undefined); }, []);
   const save = async () => {
@@ -154,6 +154,7 @@ function SiteSettings() {
         <label>SEO 描述<textarea value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} rows={2} /></label>
         <label>SEO 关键词<input value={f.keywords} onChange={(e) => setF({ ...f, keywords: e.target.value })} /></label>
         <label>页脚文案<input value={f.footer} onChange={(e) => setF({ ...f, footer: e.target.value })} /></label>
+        <label>ICP 备案号（页脚固定链接到工信部备案系统，留空则不显示）<input value={f.icp} placeholder="黔ICP备2026016351号-1" onChange={(e) => setF({ ...f, icp: e.target.value })} /></label>
         <label className="check"><input type="checkbox" checked={f.registerOpen} onChange={(e) => setF({ ...f, registerOpen: e.target.checked })} /> 开放注册</label>
         <label className="check"><input type="checkbox" checked={f.oauthShowLogin} onChange={(e) => setF({ ...f, oauthShowLogin: e.target.checked })} /> 登录弹窗显示第三方登录入口</label>
         <label>站点 Logo
@@ -197,7 +198,7 @@ function SmtpSettings() {
         <label>发信账号<input value={f.user} onChange={(e) => setF({ ...f, user: e.target.value })} /></label>
         <label>账号密码 / 授权码<input type="password" value={pass} placeholder={f.hasPass ? "已设置（留空不改）" : "未设置"} onChange={(e) => setPass(e.target.value)} /></label>
         <label>发件人邮箱<input value={f.from} placeholder="留空则用发信账号" onChange={(e) => setF({ ...f, from: e.target.value })} /></label>
-        <label>发件人显示名<input value={f.fromName} placeholder="如 NotePro" onChange={(e) => setF({ ...f, fromName: e.target.value })} /></label>
+        <label>发件人显示名<input value={f.fromName} placeholder="如 己素" onChange={(e) => setF({ ...f, fromName: e.target.value })} /></label>
         <label>测试收件邮箱
           <span className="code-row">
             <input value={testTo} placeholder="留空则发给当前管理员邮箱" onChange={(e) => setTestTo(e.target.value)} />

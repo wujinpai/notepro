@@ -10,7 +10,7 @@ export interface NoteInfo {
 }
 export interface SiteInfo {
   name: string; subtitle: string; description: string; keywords: string; footer: string;
-  logo: string; registerOpen: boolean; oauthProviders: string[];
+  icp: string; logo: string; registerOpen: boolean; oauthProviders: string[];
 }
 
 async function req<T>(method: string, url: string, body?: unknown): Promise<T> {

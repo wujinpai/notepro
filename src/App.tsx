@@ -31,9 +31,35 @@ function useTheme() {
   return { theme, toggle };
 }
 
+function SunIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <circle cx="12" cy="12" r="4.4" fill="currentColor" />
+      <g stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+        <line x1="12" y1="2.6" x2="12" y2="5.1" />
+        <line x1="12" y1="18.9" x2="12" y2="21.4" />
+        <line x1="2.6" y1="12" x2="5.1" y2="12" />
+        <line x1="18.9" y1="12" x2="21.4" y2="12" />
+        <line x1="5.2" y1="5.2" x2="7" y2="7" />
+        <line x1="17" y1="17" x2="18.8" y2="18.8" />
+        <line x1="18.8" y1="5.2" x2="17" y2="7" />
+        <line x1="7" y1="17" x2="5.2" y2="18.8" />
+      </g>
+    </svg>
+  );
+}
+
+function MoonIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path fill="currentColor" d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+    </svg>
+  );
+}
+
 export default function App() {
   const { theme, toggle } = useTheme();
-  const [site, setSite] = useState<SiteInfo>({ name: "NotePro", subtitle: "", description: "", keywords: "", footer: "", logo: "", registerOpen: true, oauthProviders: [] });
+  const [site, setSite] = useState<SiteInfo>({ name: "己素", subtitle: "Jisu", description: "", keywords: "", footer: "", icp: "", logo: "", registerOpen: true, oauthProviders: [] });
   const [user, setUser] = useState<UserInfo | null>(null);
   const [authOpen, setAuthOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -48,7 +74,7 @@ export default function App() {
   useEffect(() => {
     api.get<SiteInfo>("/api/site").then((d) => {
       setSite(d);
-      document.title = d.subtitle ? `${d.name} · ${d.subtitle}` : d.name;
+      document.title = d.subtitle ? `${d.name} - ${d.subtitle}` : d.name;
       const meta = document.querySelector('meta[name="description"]');
       if (meta && d.description) meta.setAttribute("content", d.description);
     }).catch(() => undefined);
@@ -104,7 +130,7 @@ export default function App() {
           {site.subtitle && <span className="brand-sub">{site.subtitle}</span>}
         </a>
         <nav className="top-actions">
-          <button className="icon-btn" onClick={toggle} title={theme === "dark" ? "切换到白天" : "切换到夜晚"} aria-label="切换主题">{theme === "dark" ? "☀" : "☾"}</button>
+          <button className="icon-btn" onClick={toggle} title={theme === "dark" ? "切换到白天" : "切换到夜晚"} aria-label="切换主题">{theme === "dark" ? <SunIcon /> : <MoonIcon />}</button>
           {user ? (
             <>
               <button className="btn btn-primary" onClick={() => openEdit(null)}>写笔记</button>
@@ -151,6 +177,7 @@ export default function App() {
       <footer className="site-footer">
         <span>{site.name}{site.subtitle ? ` · ${site.subtitle}` : ""}</span>
         {site.footer && <span>{site.footer}</span>}
+        {site.icp && <a className="icp-link" href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">{site.icp}</a>}
       </footer>
 
       {authOpen && <AuthDialog site={site} onClose={() => setAuthOpen(false)} onAuthed={(u) => { setUser(u); }} />}

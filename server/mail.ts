@@ -78,7 +78,7 @@ export async function sendEmailCode(email: string, purpose: string): Promise<{ o
   db.prepare("INSERT INTO email_codes(email,purpose,code_hash,expires_at,created_at) VALUES(?,?,?,?,?)")
     .run(email, purpose, sha256(`${email}|${purpose}|${code}`), now + 10 * 60_000, now);
   const label = PURPOSE_LABEL[purpose] || "验证";
-  const site = getSetting("site_name", "NotePro");
+  const site = getSetting("site_name", "己素");
   const fromName = (() => { const c = getSmtpConfig(); return c?.fromName || site; })();
   const subject = `${fromName} · ${label}验证码`;
   const text = `您正在${label}，验证码是 ${code}（10 分钟内有效）。如非本人操作请忽略。`;
