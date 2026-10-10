@@ -186,7 +186,7 @@ export default function App() {
         ) : noteId ? (
           <NoteDetail noteId={Number(noteId)} user={user} onBack={() => go("#")} onEdit={openEdit} onDeleted={() => go("#")} />
         ) : (
-          <HomePage user={user} onOpenNote={openNote} />
+          <HomePage user={user} site={site} onOpenNote={openNote} />
         )}
       </main>
 

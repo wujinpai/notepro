@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { api, type NoteInfo, type UserInfo } from "./api";
-import { Lightbox, NoteCard, imageHit } from "./components";
+import { api, type NoteInfo, type SiteInfo, type UserInfo } from "./api";
+import { Avatar, Lightbox, NoteCard, imageHit } from "./components";
 import { renderMarkdown } from "./md";
 
 export function Calendar({ month, days, selected, onMonth, onSelect }: {
@@ -45,8 +45,8 @@ export function Calendar({ month, days, selected, onMonth, onSelect }: {
   );
 }
 
-export function HomePage({ user, onOpenNote }: {
-  user: UserInfo | null; onOpenNote: (n: NoteInfo) => void;
+export function HomePage({ user, site, onOpenNote }: {
+  user: UserInfo | null; site: SiteInfo; onOpenNote: (n: NoteInfo) => void;
 }) {
   const [notes, setNotes] = useState<NoteInfo[]>([]);
   const [total, setTotal] = useState(0);
@@ -96,6 +96,25 @@ export function HomePage({ user, onOpenNote }: {
         )}
       </section>
       <aside className="side">
+        {user ? (
+          <a className="side-card side-user" href="#me">
+            <Avatar url={user.avatar} name={user.nickname} size={46} />
+            <span className="side-user-meta">
+              <strong>{user.nickname}</strong>
+              <span className="muted tiny">@{user.username}</span>
+            </span>
+          </a>
+        ) : (
+          <div className="side-card side-user">
+            {site.logo
+              ? <img src={site.logo} alt="" className="brand-logo" />
+              : <span className="brand-badge">{(site.name || "N").slice(0, 1)}</span>}
+            <span className="side-user-meta">
+              <strong>{site.name}</strong>
+              <span className="muted tiny">{site.subtitle || site.description || "多用户笔记广场"}</span>
+            </span>
+          </div>
+        )}
         <div className="side-card cal-card">
           <button type="button" className="cal-toggle" aria-expanded={calOpen} onClick={() => setCalOpen(!calOpen)}>
             <span className="cal-toggle-title">日历归档</span>

@@ -103,13 +103,18 @@ img { max-width: 100%; }
 [data-theme="dark"] .seg button.on { color: #202124; }
 
 /* 首页布局 */
-.home-layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 20px; align-items: start; }
+.home-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; align-items: start; }
 .feed { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 .feed-tools { display: flex; gap: 8px; align-items: center; }
 .search { max-width: 320px; }
 .side { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 .side-card { border: 1px solid var(--border); border-radius: 4px; padding: 14px; background: var(--bg); }
 .side-card h4 { font-size: 14px; margin-bottom: 10px; }
+.side-user { display: none; align-items: center; gap: 12px; color: var(--text); }
+a.side-user:hover { border-color: var(--blue); }
+.side-user-meta { display: flex; flex-direction: column; min-width: 0; }
+.side-user-meta strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.side-user-meta span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tag-row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
 .tag-row.wrap { margin-top: 0; }
 .pager { display: flex; align-items: center; gap: 12px; justify-content: center; padding: 8px 0; }
@@ -324,7 +329,8 @@ th { color: var(--muted); font-weight: 500; font-size: 13px; }
 
 /* 响应式：390px 手机零横向溢出 */
 @media (max-width: 860px) {
-  .home-layout { grid-template-columns: minmax(0, 1fr); }
+  /* iOS 聚焦字号小于 16px 的控件会自动放大页面，移动端强制不低于 16px */
+  input, textarea, select { font-size: 16px !important; }
   .me-layout { grid-template-columns: minmax(0, 1fr); }
   .me-nav { flex-direction: row; flex-wrap: wrap; align-items: center; }
   .me-card-brief { flex-direction: row; border-bottom: none; margin: 0; padding: 4px; width: 100%; text-align: left; }
@@ -335,4 +341,15 @@ th { color: var(--muted); font-weight: 500; font-size: 13px; }
   .search { max-width: none; flex: 1; }
   .container { padding: 14px 10px 32px; }
   .user-chip span { display: none; }
+}
+
+/* 桌面端（沿用全站 860px 断点）：Memos 式左栏 + 右主栏 */
+@media (min-width: 861px) {
+  .home-layout { grid-template-columns: 280px minmax(0, 1fr); }
+  .home-layout .feed { grid-column: 2; grid-row: 1; }
+  .home-layout .side {
+    grid-column: 1; grid-row: 1; position: sticky; top: 71px;
+    max-height: calc(100vh - 87px); overflow-y: auto;
+  }
+  .side-user { display: flex; }
 }
