@@ -182,13 +182,14 @@ async function main() {
   // 第二设备登录（旧密码）
   await aliceB.post("/api/auth/login", { account: "alice", password: "alice123", ticket: await solveSlider(aliceB) });
   check("第二设备可登录", (await aliceB.get("/api/auth/me")).status === 200);
-  // 换绑邮箱：当前密码 + 新邮箱验证码
+  // 换绑邮箱：新邮箱验证码即可，无需当前密码
   const bindSend = await sendCodeAndGrab(alice, "/api/me/send-bind-code", { email: "alice2@example.com" });
   check("换绑发码成功", bindSend.r.status === 200 && /^\d{6}$/.test(bindSend.code));
-  const bindBad = await alice.post("/api/me/bind-email", { email: "alice2@example.com", code: bindSend.code, password: "wrong-pass" });
-  check("换绑时错密码被拒", bindBad.status === 400);
-  r = await alice.post("/api/me/bind-email", { email: "alice2@example.com", code: bindSend.code, password: "alice123" });
-  check("换绑邮箱成功", r.status === 200 && r.json.user.email === "alice2@example.com");
+  const wrongBindCode = bindSend.code === "999999" ? "000000" : "999999";
+  const bindBad = await alice.post("/api/me/bind-email", { email: "alice2@example.com", code: wrongBindCode });
+  check("换绑验证码错误被拒", bindBad.status === 400);
+  r = await alice.post("/api/me/bind-email", { email: "alice2@example.com", code: bindSend.code });
+  check("无密码换绑邮箱成功", r.status === 200 && r.json.user.email === "alice2@example.com");
   // 改密（邮箱验证码）
   const pwSend = await sendCodeAndGrab(alice, "/api/me/send-changepw-code", {});
   check("改密发码成功", pwSend.r.status === 200 && /^\d{6}$/.test(pwSend.code));
@@ -220,6 +221,8 @@ async function main() {
   r = await bob.post("/api/auth/register", { username: "bob", email: "bob@example.com", code: reg2.code, password: "bob12345", ticket: await solveSlider(bob) });
   check("第二个用户注册成功且非管理员", r.status === 200 && r.json.user.role === "user");
   const bobId = r.json.user.id;
+  const occupied = await bob.post("/api/me/bind-email", { email: "alice2@example.com", code: "123456" });
+  check("换绑到已被占用的邮箱被拒", occupied.status === 409);
   check("普通用户访问后台被拒", (await bob.get("/api/admin/overview")).status === 403);
   const bobNote = await bob.post("/api/notes", { title: "Bob 的公开帖", content: "大家好", tags: [], visibility: "public" });
   check("普通用户可发帖", bobNote.status === 200);

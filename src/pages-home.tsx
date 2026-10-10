@@ -45,22 +45,19 @@ export function Calendar({ month, days, selected, onMonth, onSelect }: {
   );
 }
 
-export function HomePage({ user, site, onOpenNote, onComment, q, onSearch, theme, onToggleTheme, onLogout, drawerOpen, onCloseDrawer, onOpenAuth }: {
+export function HomePage({ user, site, onOpenNote, onComment, q, onSearch, tag, onTag, date, onDate, month, onMonth, days, tags }: {
   user: UserInfo | null; site: SiteInfo; onOpenNote: (n: NoteInfo) => void;
   onComment: (n: NoteInfo) => void;
   q: string; onSearch: (v: string) => void;
-  theme: "light" | "dark"; onToggleTheme: () => void; onLogout: () => void;
-  drawerOpen: boolean; onCloseDrawer: () => void; onOpenAuth: () => void;
+  // 标签/日期过滤与日历数据由 App 层持有（抽屉与桌面侧栏共用同一份状态）
+  tag: string; onTag: (t: string) => void;
+  date: string; onDate: (d: string) => void;
+  month: string; onMonth: (m: string) => void;
+  days: Record<string, number>; tags: { name: string; count: number }[];
 }) {
   const [notes, setNotes] = useState<NoteInfo[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
-  const [tag, setTag] = useState("");
-  const [tags, setTags] = useState<{ name: string; count: number }[]>([]);
-  const now = new Date();
-  const [month, setMonth] = useState(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`);
-  const [days, setDays] = useState<Record<string, number>>({});
-  const [date, setDate] = useState("");
 
   const load = useCallback(async () => {
     const params = new URLSearchParams({ page: String(page), size: "20" });
@@ -73,58 +70,19 @@ export function HomePage({ user, site, onOpenNote, onComment, q, onSearch, theme
     } catch { setNotes([]); setTotal(0); }
   }, [page, tag, q, date]);
 
-  // 搜索词来自顶栏弹出条 / 抽屉搜索框（同一状态），变化时回第一页
-  useEffect(() => { setPage(1); }, [q]);
+  // 搜索词/标签/日期任一过滤变化时回第一页（含抽屉在非首页设置后带回的过滤）
+  useEffect(() => { setPage(1); }, [q, tag, date]);
   useEffect(() => { void load(); }, [load]);
-  useEffect(() => {
-    api.get<{ tags: { name: string; count: number }[] }>("/api/tags").then((d) => setTags(d.tags)).catch(() => setTags([]));
-    api.get<{ days: Record<string, number> }>(`/api/calendar?month=${month}`).then((d) => setDays(d.days)).catch(() => setDays({}));
-  }, [month, user]);
 
   const [calOpen, setCalOpen] = useState(false);
 
-  // 移动端抽屉：打开时可靠锁住背景滚动，Esc 关闭
-  const touchX = useRef<number | null>(null);
-  const closeDrawerRef = useRef(onCloseDrawer);
-  useEffect(() => { closeDrawerRef.current = onCloseDrawer; });
-  useEffect(() => {
-    if (!drawerOpen) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") closeDrawerRef.current(); };
-    document.addEventListener("keydown", onKey);
-    // iOS 上仅 body overflow:hidden 挡不住背景滚动、面板高度还会随动态工具栏变化被拉伸，
-    // 改用 position:fixed 锁定 body（记录并保持当前滚动位置），关闭时精确恢复。
-    const body = document.body;
-    const scrollY = window.scrollY;
-    const prev = {
-      position: body.style.position, top: body.style.top, left: body.style.left,
-      right: body.style.right, width: body.style.width, overflow: body.style.overflow,
-    };
-    body.style.position = "fixed";
-    body.style.top = `-${scrollY}px`;
-    body.style.left = "0";
-    body.style.right = "0";
-    body.style.width = "100%";
-    body.style.overflow = "hidden";
-    return () => {
-      document.removeEventListener("keydown", onKey);
-      body.style.position = prev.position;
-      body.style.top = prev.top;
-      body.style.left = prev.left;
-      body.style.right = prev.right;
-      body.style.width = prev.width;
-      body.style.overflow = prev.overflow;
-      window.scrollTo(0, scrollY);
-    };
-  }, [drawerOpen]);
-
   return (
-    <>
     <div className="home-layout">
       <section className="feed">
         {(q || tag) && (
           <div className="feed-tools">
             {q && <button className="chip chip-on" onClick={() => onSearch("")}>搜索「{q}」 ✕</button>}
-            {tag && <button className="chip chip-on" onClick={() => setTag("")}>#{tag} ✕</button>}
+            {tag && <button className="chip chip-on" onClick={() => onTag("")}>#{tag} ✕</button>}
           </div>
         )}
         {notes.length === 0 && <div className="empty">暂无笔记{user ? "，点击右上角「独白」发布第一篇" : ""}。</div>}
@@ -167,7 +125,7 @@ export function HomePage({ user, site, onOpenNote, onComment, q, onSearch, theme
           </button>
           <div className={`cal-collapse${calOpen ? " open" : ""}`}>
             <div className="cal-collapse-inner">
-              <Calendar month={month} days={days} selected={date} onMonth={setMonth} onSelect={(d) => { setDate(d); setPage(1); }} />
+              <Calendar month={month} days={days} selected={date} onMonth={onMonth} onSelect={onDate} />
             </div>
           </div>
         </div>
@@ -176,7 +134,7 @@ export function HomePage({ user, site, onOpenNote, onComment, q, onSearch, theme
           <div className="tag-row wrap">
             {tags.length === 0 && <span className="muted tiny">暂无标签</span>}
             {tags.map((t) => (
-              <button key={t.name} className={`chip${tag === t.name ? " chip-on" : ""}`} onClick={() => { setTag(tag === t.name ? "" : t.name); setPage(1); }}>
+              <button key={t.name} className={`chip${tag === t.name ? " chip-on" : ""}`} onClick={() => onTag(tag === t.name ? "" : t.name)}>
                 #{t.name} <em>{t.count}</em>
               </button>
             ))}
@@ -184,17 +142,76 @@ export function HomePage({ user, site, onOpenNote, onComment, q, onSearch, theme
         </div>
       </aside>
     </div>
+  );
+}
 
-    {/* 移动端抽屉（仅 ≤860px 渲染样式，桌面 display:none）：站点卡 + 直展日历 + 标签 + 底部登录状态 */}
-    <div className={`drawer-root${drawerOpen ? " open" : ""}`} aria-hidden={!drawerOpen}>
-      <div className="drawer-backdrop" onClick={onCloseDrawer} />
+// 移动端抽屉（App 层渲染，任何主页面可用；仅 ≤860px 渲染样式，桌面 display:none）：
+// 站点卡 + 搜索 + 直展日历 + 标签 + 外观 + 底部登录状态。在非首页点日期/标签/搜索会由
+// App 的回调设置过滤并带回首页；已在首页则原地过滤。打开时可靠锁住背景滚动，Esc 关闭。
+export function SiteDrawer({ open, onClose, site, user, theme, onToggleTheme, onLogout, onOpenAuth, onHome,
+  q, onSearch, onSearchCommit, tags, tag, onPickTag, month, days, date, onMonth, onPickDate }: {
+  open: boolean; onClose: () => void;
+  site: SiteInfo; user: UserInfo | null;
+  theme: "light" | "dark"; onToggleTheme: () => void; onLogout: () => void;
+  onOpenAuth: () => void; onHome: () => void;
+  q: string; onSearch: (v: string) => void; onSearchCommit: () => void;
+  tags: { name: string; count: number }[]; tag: string; onPickTag: (t: string) => void;
+  month: string; days: Record<string, number>; date: string;
+  onMonth: (m: string) => void; onPickDate: (d: string) => void;
+}) {
+  const touchX = useRef<number | null>(null);
+  // 本次打开期间是否改动过搜索词：关闭（收起类）时若有词且不在首页，带回首页看结果
+  const editedRef = useRef(false);
+  const dismiss = useCallback(() => {
+    if (editedRef.current && q) onSearchCommit();
+    onClose();
+  }, [q, onClose, onSearchCommit]);
+  const dismissRef = useRef(dismiss);
+  useEffect(() => { dismissRef.current = dismiss; });
+  useEffect(() => { if (open) editedRef.current = false; }, [open ]);
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") dismissRef.current(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [open ]);
+  useEffect(() => {
+    if (!open) return;
+    // iOS 上仅 body overflow:hidden 挡不住背景滚动、面板高度还会随动态工具栏变化被拉伸，
+    // 改用 position:fixed 锁定 body（记录并保持当前滚动位置），关闭时精确恢复。
+    const body = document.body;
+    const scrollY = window.scrollY;
+    const prev = {
+      position: body.style.position, top: body.style.top, left: body.style.left,
+      right: body.style.right, width: body.style.width, overflow: body.style.overflow,
+    };
+    body.style.position = "fixed";
+    body.style.top = `-${scrollY}px`;
+    body.style.left = "0";
+    body.style.right = "0";
+    body.style.width = "100%";
+    body.style.overflow = "hidden";
+    return () => {
+      body.style.position = prev.position;
+      body.style.top = prev.top;
+      body.style.left = prev.left;
+      body.style.right = prev.right;
+      body.style.width = prev.width;
+      body.style.overflow = prev.overflow;
+      window.scrollTo(0, scrollY);
+    };
+  }, [open ]);
+
+  return (
+    <div className={`drawer-root${open ? " open" : ""}`} aria-hidden={!open}>
+      <div className="drawer-backdrop" onClick={dismiss} />
       <aside className="drawer" aria-label="站点导航"
         onTouchStart={(e) => { touchX.current = e.touches[0].clientX; }}
         onTouchEnd={(e) => {
-          if (touchX.current !== null && e.changedTouches[0].clientX - touchX.current < -56) onCloseDrawer();
+          if (touchX.current !== null && e.changedTouches[0].clientX - touchX.current < -56) dismiss();
           touchX.current = null;
         }}>
-        <button type="button" className="drawer-site" onClick={() => { onCloseDrawer(); window.scrollTo(0, 0); }}>
+        <button type="button" className="drawer-site" onClick={() => { onHome(); onClose(); window.scrollTo(0, 0); }}>
           {site.logo
             ? <img src={site.logo} alt="" className="brand-logo" />
             : site.name ? <span className="brand-badge">{site.name.slice(0, 1)}</span> : <span className="brand-badge brand-badge-blank" aria-hidden="true" />}
@@ -204,14 +221,14 @@ export function HomePage({ user, site, onOpenNote, onComment, q, onSearch, theme
         <div className="drawer-sec">
           <div className="drawer-search">
             <input value={q} placeholder="搜索标题或正文…" aria-label="搜索标题或正文"
-              onChange={(e) => onSearch(e.target.value)} />
+              onChange={(e) => { editedRef.current = true; onSearch(e.target.value); }}
+              onKeyDown={(e) => { if (e.key === "Enter") dismiss(); }} />
             {q && <button type="button" className="icon-btn search-clear" aria-label="清除搜索" onClick={() => onSearch("")}>✕</button>}
           </div>
         </div>
         <div className="drawer-sec">
           <h5>日历归档</h5>
-          <Calendar month={month} days={days} selected={date} onMonth={setMonth}
-            onSelect={(d) => { setDate(d); setPage(1); onCloseDrawer(); }} />
+          <Calendar month={month} days={days} selected={date} onMonth={onMonth} onSelect={onPickDate} />
         </div>
         <div className="drawer-sec">
           <h5>标签</h5>
@@ -219,7 +236,7 @@ export function HomePage({ user, site, onOpenNote, onComment, q, onSearch, theme
             {tags.length === 0 && <span className="muted tiny">暂无标签</span>}
             {tags.map((t) => (
               <button key={t.name} className={`chip${tag === t.name ? " chip-on" : ""}`}
-                onClick={() => { setTag(tag === t.name ? "" : t.name); setPage(1); onCloseDrawer(); }}>
+                onClick={() => onPickTag(tag === t.name ? "" : t.name)}>
                 #{t.name} <em>{t.count}</em>
               </button>
             ))}
@@ -235,22 +252,21 @@ export function HomePage({ user, site, onOpenNote, onComment, q, onSearch, theme
         <div className="drawer-foot">
           {user ? (
             <div className="drawer-user-row">
-              <a className="drawer-user-link" href="#me" onClick={onCloseDrawer} aria-label="进入用户中心">
+              <a className="drawer-user-link" href="#me" onClick={onClose} aria-label="进入用户中心">
                 <Avatar url={user.avatar} name={user.nickname} size={40} />
                 <span className="drawer-user-meta">
                   <strong>{user.nickname}</strong>
                   <span className="muted tiny">@{user.username}</span>
                 </span>
               </a>
-              <button type="button" className="drawer-logout" onClick={() => { onCloseDrawer(); onLogout(); }}>退出登录</button>
+              <button type="button" className="drawer-logout" onClick={() => { onClose(); onLogout(); }}>退出登录</button>
             </div>
           ) : (
-            <button type="button" className="btn btn-primary btn-block" onClick={() => { onCloseDrawer(); onOpenAuth(); }}>登录 / 注册</button>
+            <button type="button" className="btn btn-primary btn-block" onClick={() => { onClose(); onOpenAuth(); }}>登录 / 注册</button>
           )}
         </div>
       </aside>
     </div>
-    </>
   );
 }
 

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, bootSite, cacheSite, syncFavicon, DEFAULT_ICON, type NoteInfo, type SiteInfo, type UserInfo } from "./api";
 import { AuthDialog, Avatar, MoonIcon, PenIcon, SearchIcon, SunIcon } from "./components";
-import { HomePage, NoteDetail } from "./pages-home";
+import { HomePage, NoteDetail, SiteDrawer } from "./pages-home";
 import { SharePage } from "./pages-share";
 import { EditorPage } from "./pages-editor";
 import { MePage } from "./pages-me";
@@ -51,8 +51,13 @@ export default function App() {
   const [editNote, setEditNote] = useState<NoteInfo | null>(null);
   const [editLoaded, setEditLoaded] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  // 搜索词提升到顶层：顶栏弹出条（桌面）与抽屉搜索框（移动端）共用同一状态
+  // 搜索词与标签/日期过滤、日历/标签数据都提升到 App 层：抽屉（已全局化）与首页信息流/桌面侧栏共用同一份状态
   const [q, setQ] = useState("");
+  const [tagFilter, setTagFilter] = useState("");
+  const [dateFilter, setDateFilter] = useState("");
+  const [calMonth, setCalMonth] = useState(() => { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}`; });
+  const [calDays, setCalDays] = useState<Record<string, number>>({});
+  const [allTags, setAllTags] = useState<{ name: string; count: number }[]>([]);
   const [searchOpen, setSearchOpen] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
   // 游客在信息流点「评论」先登录，登录成功后自动续跳到该篇详情评论区
@@ -62,6 +67,18 @@ export default function App() {
   const refreshUser = useCallback(() => {
     api.get<{ user: UserInfo }>("/api/auth/me").then((d) => setUser(d.user)).catch(() => setUser(null));
   }, []);
+
+  // 日历/标签导航数据：挂载、切月、登录态变化时加载，抽屉每次打开再刷新一次（各页面共用，避免重复请求风暴）
+  const loadNav = useCallback(() => {
+    api.get<{ tags: { name: string; count: number }[] }>("/api/tags").then((d) => setAllTags(d.tags)).catch(() => setAllTags([]));
+    api.get<{ days: Record<string, number> }>(`/api/calendar?month=${calMonth}`).then((d) => setCalDays(d.days)).catch(() => setCalDays({}));
+  }, [calMonth]);
+  useEffect(() => { loadNav(); }, [loadNav, user]);
+  const drawerWasOpen = useRef(false);
+  useEffect(() => {
+    if (drawerOpen && !drawerWasOpen.current) loadNav();
+    drawerWasOpen.current = drawerOpen;
+  }, [drawerOpen, loadNav]);
 
   useEffect(() => {
     api.get<SiteInfo>("/api/site").then((d) => {
@@ -149,10 +166,13 @@ export default function App() {
     setCommentFocus(n.id);
     go(`#note/${n.id}`);
   };
-  const openDrawer = () => {
-    if (!isHome) go("#");
-    setDrawerOpen(true);
-  };
+  // 抽屉已提升到 App 层：任何主页面点汉堡只开抽屉、停留在当前页，不再强制跳首页
+  const openDrawer = () => setDrawerOpen(true);
+  // 抽屉里点日期/标签：先设置过滤，非首页再带回首页看结果；已在首页则原地过滤（抽屉随之关闭）
+  const pickDateAndGo = (d: string) => { setDateFilter(d); setDrawerOpen(false); if (!isHome) go("#"); };
+  const pickTagAndGo = (t: string) => { setTagFilter(t); setDrawerOpen(false); if (!isHome) go("#"); };
+  // 抽屉内改动过搜索词后关闭：非首页带回首页看搜索结果
+  const drawerSearchCommit = () => { if (!isHome) go("#"); };
   const toggleSearch = () => {
     if (!isHome) go("#");
     setSearchOpen((s) => !s);
@@ -234,10 +254,20 @@ export default function App() {
             focusComments={commentFocus === Number(noteId)} onAuthRequest={() => setAuthOpen(true)} />
         ) : (
           <HomePage user={user} site={site} onOpenNote={openNote} onComment={openComment}
-            q={q} onSearch={setQ} theme={theme} onToggleTheme={toggle} onLogout={() => void logout()}
-            drawerOpen={drawerOpen} onCloseDrawer={() => setDrawerOpen(false)} onOpenAuth={() => setAuthOpen(true)} />
+            q={q} onSearch={setQ}
+            tag={tagFilter} onTag={setTagFilter} date={dateFilter} onDate={setDateFilter}
+            month={calMonth} onMonth={setCalMonth} days={calDays} tags={allTags} />
         )}
       </main>
+
+      {/* 全局抽屉：首页/用户中心/详情/编辑等所有带顶栏的页面共用，点汉堡只开抽屉不跳页 */}
+      <SiteDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)}
+        site={site} user={user} theme={theme} onToggleTheme={toggle}
+        onLogout={() => void logout()} onOpenAuth={() => setAuthOpen(true)}
+        onHome={() => { if (!isHome) go("#"); }}
+        q={q} onSearch={setQ} onSearchCommit={drawerSearchCommit}
+        tags={allTags} tag={tagFilter} onPickTag={pickTagAndGo}
+        month={calMonth} days={calDays} date={dateFilter} onMonth={setCalMonth} onPickDate={pickDateAndGo} />
 
       <footer className="site-footer">
         <span>{site.name}{site.subtitle ? ` · ${site.subtitle}` : ""}</span>

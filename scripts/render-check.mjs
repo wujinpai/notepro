@@ -334,6 +334,19 @@ async function main() {
   await shot(page, "home", 390);
   await page.goto(BASE + "/#me", { waitUntil: "networkidle" });
   await shot(page, "user-center", 390);
+  // 换绑邮箱弹窗：无当前密码框，只需新邮箱验证码
+  await page.locator(".me-tabs > button", { hasText: "账号安全" }).click();
+  await page.waitForTimeout(400);
+  await page.getByRole("button", { name: "换绑邮箱" }).click();
+  await page.waitForTimeout(400);
+  const bindModal = await page.evaluate(() => {
+    const m = document.querySelector(".modal-panel");
+    return m ? { hasPw: !!m.querySelector('input[type="password"]'), text: (m.textContent || "").replace(/\s+/g, "") } : null;
+  });
+  expect("390 账号安全：换绑邮箱弹窗无密码框、只需新邮箱验证码",
+    !!bindModal && !bindModal.hasPw && bindModal.text.includes("无需输入当前密码"), JSON.stringify(bindModal));
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(300);
   await page.goto(BASE + "/#admin", { waitUntil: "networkidle" });
   await shot(page, "admin", 390);
   // 用户中心选择栏：单行横滑不折行（5 个标签同一行、容器可横滚）
@@ -458,6 +471,38 @@ async function main() {
     hasMeNav: !!document.querySelector(".me-tabs"),
   }));
   expect("390 抽屉：点头像行进用户中心并关抽屉", afterMe.hash === "#me" && !afterMe.drawerOpen && afterMe.hasMeNav, JSON.stringify(afterMe));
+  await ctx.close();
+
+  // ---------- 手机 390x640：用户中心点汉堡只开抽屉不跳页；抽屉点日期回首页带过滤 ----------
+  ctx = await browser.newContext({ viewport: { width: 390, height: 640 }, isMobile: true, hasTouch: true });
+  await ctx.addCookies([{ name: "np_session", value: adminToken, domain: "127.0.0.1", path: "/" }]);
+  page = await ctx.newPage();
+  await page.goto(BASE + "/#me", { waitUntil: "networkidle" });
+  await page.evaluate(() => { document.querySelector('button[aria-label="打开菜单"]')?.click(); });
+  await page.waitForTimeout(600);
+  const meDrawer = await page.evaluate(() => ({
+    hash: location.hash,
+    open: document.querySelector(".drawer-root")?.classList.contains("open"),
+    hasMeNav: !!document.querySelector(".me-tabs"),
+  }));
+  expect("390 用户中心：点汉堡只开抽屉、路由仍在 #me（不跳首页）", meDrawer.open && meDrawer.hash === "#me" && meDrawer.hasMeNav, JSON.stringify(meDrawer));
+  const today2 = new Date();
+  const todayStr2 = `${today2.getFullYear()}-${String(today2.getMonth() + 1).padStart(2, "0")}-${String(today2.getDate()).padStart(2, "0")}`;
+  await page.evaluate(() => {
+    const t = [...document.querySelectorAll(".drawer .cal-day")].find((b) => b.querySelector("em"));
+    t?.click();
+  });
+  await page.waitForTimeout(900);
+  const afterPick = await page.evaluate(() => ({
+    hash: location.hash,
+    open: document.querySelector(".drawer-root")?.classList.contains("open"),
+    sideSelected: !!document.querySelector(".side .cal-day.on"),
+    toggleText: document.querySelector(".side .cal-toggle")?.textContent || "",
+    cards: document.querySelectorAll(".note-card").length,
+  }));
+  expect("390 用户中心抽屉：点日期回首页且该日过滤生效、抽屉关闭",
+    afterPick.hash.replace("#", "") === "" && !afterPick.open && afterPick.sideSelected && afterPick.toggleText.includes(todayStr2) && afterPick.cards > 0,
+    JSON.stringify(afterPick));
   await ctx.close();
 
   // ---------- 手机 390 游客：登录入口走抽屉 ----------

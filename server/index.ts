@@ -281,10 +281,8 @@ app.post("/api/me/bind-email", requireAuth, (req, res) => {
   const u = authedUser(req);
   const email = String(req.body?.email || "").trim().toLowerCase();
   const code = String(req.body?.code || "").trim();
-  const password = String(req.body?.password || "");
   if (!EMAIL_RE.test(email)) return fail(res, 400, "邮箱格式不正确");
-  // 有密码的账号须验当前密码；纯第三方账号（无密码）凭登录态 + 新邮箱验证码换绑
-  if (u.password_hash && !verifyPassword(password, u.password_hash)) return fail(res, 400, "当前密码不正确");
+  // 换绑/绑定不验当前密码：登录态 + 滑块票发码 + 新邮箱验证码正确即可（与改密/找回的验证码口径一致）
   const other = getUserByEmail(email);
   if (other && other.id !== u.id) return fail(res, 409, "该邮箱已被其他账号绑定");
   if (!verifyEmailCode(email, "bind", code)) return fail(res, 400, "邮箱验证码错误或已过期");

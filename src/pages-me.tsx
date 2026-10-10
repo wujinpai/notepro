@@ -116,7 +116,6 @@ function CodeBox({ onSend, busy, left, label }: { onSend: () => void; busy: bool
 function BindEmailModal({ user, onClose, onDone }: { user: UserInfo; onClose: () => void; onDone: () => void }) {
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
-  const [password, setPassword] = useState("");
   const [ticket, setTicket] = useState("");
   const [sliderKey, setSliderKey] = useState(0);
   const [left, setLeft] = useState(0);
@@ -128,15 +127,14 @@ function BindEmailModal({ user, onClose, onDone }: { user: UserInfo; onClose: ()
     catch (e) { setMsg((e as Error).message); }
   };
   const bind = async () => {
-    try { await api.post("/api/me/bind-email", { email: email.trim(), code: code.trim(), password }); setMsg("邮箱已更新"); onDone(); }
+    try { await api.post("/api/me/bind-email", { email: email.trim(), code: code.trim() }); setMsg("邮箱已更新"); onDone(); }
     catch (e) { setMsg((e as Error).message); }
   };
   return (
     <Modal title={user.email ? "换绑邮箱" : "绑定邮箱"} onClose={onClose}>
-      <p className="muted tiny">当前邮箱：{user.email || "未绑定"}。换绑需要当前密码（纯第三方登录账号免填）+ 新邮箱验证码。</p>
+      <p className="muted tiny">当前邮箱：{user.email || "未绑定"}。只需验证新邮箱的验证码即可完成{user.email ? "换绑" : "绑定"}，无需输入当前密码。</p>
       <div className="form">
         <label>新邮箱<input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="新邮箱地址" /></label>
-        <label>当前密码{user.hasPassword === false && "（第三方账号可留空）"}<input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="当前密码" /></label>
         <label>新邮箱验证码
           <span className="code-row">
             <input value={code} onChange={(e) => setCode(e.target.value)} placeholder="6 位验证码" inputMode="numeric" />
