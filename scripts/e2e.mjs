@@ -245,6 +245,83 @@ async function main() {
   // 站点设置改回来，避免影响后续站点断言
   await alice.put("/api/admin/site", { name: "NotePro", subtitle: "", description: "", keywords: "", footer: "", registerOpen: true, oauthShowLogin: true, url: "" });
 
+  console.log("== 分享链接：取链接→游客打开→重置失效→私密凭 token 可看 ==");
+  const picPath = up.json.path;
+  const sNote = await alice.post("/api/notes", {
+    title: "分享测试帖", content: `正文一段\n\n![图](${picPath})`, tags: ["分享"], visibility: "public",
+  });
+  check("带图公开帖创建成功", sNote.status === 200 && sNote.json.note.allowComments === true);
+  const sId = sNote.json.note.id;
+  const gShare = await guest.get(`/api/notes/${sId}/share`);
+  check("游客可取公开帖分享信息", gShare.status === 200 && !!gShare.json?.token && gShare.json?.url?.endsWith("/s/" + gShare.json.token) && gShare.json?.isAuthor === false, `${gShare.status} ${JSON.stringify(gShare.json)}`);
+  const tok1 = gShare.json.token;
+  const gOpen = await guest.get(`/api/share/${tok1}`);
+  check("游客凭 token 打开分享内容", gOpen.status === 200 && gOpen.json.note.id === sId && gOpen.json.note.content.includes(picPath));
+  r = await guest.get(`/s/${tok1}`);
+  check("真实路径 /s/<token> 回 SPA 入口", r.status === 200 && r.text.includes('<div id="root">'), String(r.status));
+  const gPrivShare = await guest.get(`/api/notes/${priv.json.note.id}/share`);
+  check("私密帖分享信息游客不可取（404）", gPrivShare.status === 404);
+  const aPrivShare = await alice.get(`/api/notes/${priv.json.note.id}/share`);
+  check("私密帖作者可取分享信息", aPrivShare.status === 200 && aPrivShare.json.isAuthor === true && !!aPrivShare.json.token);
+  const gPrivOpen = await guest.get(`/api/share/${aPrivShare.json.token}`);
+  check("私密帖凭 token 可看", gPrivOpen.status === 200 && gPrivOpen.json.note.id === priv.json.note.id);
+  check("私密帖无 token 直查仍 404", (await guest.get(`/api/notes/${priv.json.note.id}`)).status === 404);
+  r = await new Agent().post(`/api/notes/${sId}/share/reset`);
+  check("未登录重置分享链接被拒", r.status === 401);
+  const aliceResetBob = await alice.post(`/api/notes/${bobNote.json.note.id}/share/reset`);
+  check("非作者重置他人的分享链接被拒", aliceResetBob.status === 404);
+  const aReset = await alice.post(`/api/notes/${sId}/share/reset`);
+  check("作者重置分享链接成功且换新 token", aReset.status === 200 && !!aReset.json.token && aReset.json.token !== tok1);
+  check("重置后旧链接立即失效", (await guest.get(`/api/share/${tok1}`)).status === 404);
+  check("重置后新链接可用", (await guest.get(`/api/share/${aReset.json.token}`)).status === 200);
+  check("不存在的 token 回 404 友好错误", (await guest.get("/api/share/deadbeefdeadbeefdeadbeef")).status === 404);
+
+  console.log("== 评论：发表/计数/关开关/三方删除权限 ==");
+  const bobL = new Agent();
+  r = await bobL.post("/api/auth/login", { account: "bob", password: "bob12345", ticket: await solveSlider(new Agent()) });
+  check("bob 重新登录成功", r.status === 200, `${r.status} ${JSON.stringify(r.json)}`);
+  const guestPost = await new Agent().post(`/api/notes/${sId}/comments`, { content: "游客评论" });
+  check("未登录发表评论 401", guestPost.status === 401);
+  const c1 = await bobL.post(`/api/notes/${sId}/comments`, { content: "写得不错 <script>alert(1)</script>" });
+  check("登录用户发表评论成功（正文原样存储，前台按文本渲染）", c1.status === 200 && c1.json.comment.content.includes("<script>"));
+  const c1Id = c1.json.comment.id;
+  feed = (await guest.get("/api/notes")).json;
+  check("广场卡片评论计数 +1", feed.notes.find((n) => n.id === sId)?.commentCount === 1, JSON.stringify(feed.notes.find((n) => n.id === sId)));
+  const longPost = await bobL.post(`/api/notes/${sId}/comments`, { content: "评".repeat(501) });
+  check("超 500 字评论被拒", longPost.status === 400);
+  const emptyPost = await bobL.post(`/api/notes/${sId}/comments`, { content: "   " });
+  check("空评论被拒", emptyPost.status === 400);
+  let clist = (await guest.get(`/api/notes/${sId}/comments`)).json;
+  check("游客可读公开帖评论列表", clist.allowComments === true && clist.total === 1 && clist.comments[0].author?.username === "bob");
+  // bob 删 alice 在自己帖下的评论 → 无权
+  const cAlice = await alice.post(`/api/notes/${sId}/comments`, { content: "作者自评" });
+  const bobDelAlice = await bobL.del(`/api/comments/${cAlice.json.comment.id}`);
+  check("普通用户删他人评论被拒", bobDelAlice.status === 403);
+  // 作者删 bob 的评论（笔记作者维度）
+  const aliceDelBob = await alice.del(`/api/comments/${c1Id}`);
+  check("笔记作者可删评论", aliceDelBob.status === 200);
+  clist = (await guest.get(`/api/notes/${sId}/comments`)).json;
+  check("删除后列表仅剩作者自评", clist.total === 1 && clist.comments[0].userId === cAlice.json.comment.userId);
+  // 管理员删 bob 在自家帖下的评论（管理员维度，alice 非该帖作者）
+  const cBob2 = await bobL.post(`/api/notes/${bobNote.json.note.id}/comments`, { content: "自家帖评论" });
+  const bobDelOwn = await bobL.del(`/api/comments/${cBob2.json.comment.id}`);
+  check("评论者本人可删自己的评论", bobDelOwn.status === 200);
+  const cBob3 = await bobL.post(`/api/notes/${bobNote.json.note.id}/comments`, { content: "再评一条" });
+  const adminDel = await alice.del(`/api/comments/${cBob3.json.comment.id}`);
+  check("管理员可删任意评论", adminDel.status === 200);
+  // 关闭评论：发表被拒、列表隐藏、卡片计数口径不变（数据保留）
+  const upd = await alice.put(`/api/notes/${sId}`, { allowComments: false });
+  check("作者关闭评论成功", upd.status === 200 && upd.json.note.allowComments === false);
+  const closedPost = await bobL.post(`/api/notes/${sId}/comments`, { content: "关了还评" });
+  check("关闭后发表被拒且错误可读", closedPost.status === 403 && /关闭/.test(closedPost.json?.error || ""), `${closedPost.status} ${closedPost.json?.error || ""}`);
+  clist = (await guest.get(`/api/notes/${sId}/comments`)).json;
+  check("关闭后评论列表隐藏", clist.allowComments === false && clist.total === 0);
+  feed = (await guest.get("/api/notes")).json;
+  check("关闭后卡片评论数口径保留实际条数", feed.notes.find((n) => n.id === sId)?.commentCount === 1);
+  const reopen = await alice.put(`/api/notes/${sId}`, { allowComments: true });
+  clist = (await guest.get(`/api/notes/${sId}/comments`)).json;
+  check("重新打开恢复显示已有评论", reopen.json.note.allowComments === true && clist.total === 1);
+
   console.log("== 管理员 SMTP 设置：遮罩、留空不改、坏主机可读失败 ==");
   r = await alice.put("/api/admin/smtp", { host: "127.0.0.1", port: 1, secure: false, user: "boss@test.cn", pass: "smtp-secret-1", from: "boss@test.cn", fromName: "测试站", enabled: true });
   check("SMTP 保存成功", r.status === 200);

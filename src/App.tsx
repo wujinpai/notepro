@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type NoteInfo, type SiteInfo, type UserInfo } from "./api";
 import { AuthDialog, Avatar } from "./components";
 import { HomePage, NoteDetail } from "./pages-home";
+import { SharePage } from "./pages-share";
 import { EditorPage } from "./pages-editor";
 import { MePage } from "./pages-me";
 import { AdminPage } from "./pages-admin";
@@ -57,6 +58,14 @@ function MoonIcon() {
   );
 }
 
+function MenuIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" fill="none" />
+    </svg>
+  );
+}
+
 export default function App() {
   const { theme, toggle } = useTheme();
   const [site, setSite] = useState<SiteInfo>({ name: "己素", subtitle: "Jisu", description: "", keywords: "", footer: "", icp: "", logo: "", registerOpen: true, oauthProviders: [] });
@@ -67,6 +76,10 @@ export default function App() {
   const [route, setRoute] = useState(location.hash);
   const [editNote, setEditNote] = useState<NoteInfo | null>(null);
   const [editLoaded, setEditLoaded] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  // 游客在信息流点「评论」先登录，登录成功后自动续跳到该篇详情评论区
+  const [pendingComment, setPendingComment] = useState<number | null>(null);
+  const [commentFocus, setCommentFocus] = useState<number | null>(null);
 
   const refreshUser = useCallback(() => {
     api.get<{ user: UserInfo }>("/api/auth/me").then((d) => setUser(d.user)).catch(() => setUser(null));
@@ -87,7 +100,7 @@ export default function App() {
   }, [refreshUser]);
 
   useEffect(() => {
-    const onHash = () => { setRoute(location.hash); setMenuOpen(false); window.scrollTo(0, 0); };
+    const onHash = () => { setRoute(location.hash); setMenuOpen(false); setDrawerOpen(false); window.scrollTo(0, 0); };
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
@@ -136,10 +149,36 @@ export default function App() {
   const isEdit = route === "#edit" || /^#edit\/\d+$/.test(route);
   const isMe = route.startsWith("#me");
   const isAdmin = route.startsWith("#admin");
+  const isHome = !noteId && !isEdit && !isMe && !isAdmin;
+
+  // 信息流「评论」：已登录直达详情评论区；游客先弹登录框，登录后自动续跳
+  const openComment = (n: NoteInfo) => {
+    if (!user) { setPendingComment(n.id); setAuthOpen(true); return; }
+    setCommentFocus(n.id);
+    go(`#note/${n.id}`);
+  };
+  const openDrawer = () => {
+    if (!isHome) go("#");
+    setDrawerOpen(true);
+  };
+  const onAuthed = (u: UserInfo) => {
+    setUser(u);
+    if (pendingComment) {
+      const id = pendingComment;
+      setPendingComment(null);
+      setCommentFocus(id);
+      go(`#note/${id}`);
+    }
+  };
+
+  // 独立分享页是真实路径 /s/<token>，不走哈希路由与应用顶栏
+  const shareMatch = location.pathname.match(/^\/s\/([A-Za-z0-9_-]{8,})$/);
+  if (shareMatch) return <SharePage token={shareMatch[1]} />;
 
   return (
     <div className="app">
       <header className="topbar">
+        <button className="icon-btn menu-btn" onClick={openDrawer} aria-label="打开菜单"><MenuIcon /></button>
         <a className="brand" href="#/" onClick={(e) => { e.preventDefault(); go("#"); }}>
           {site.logo ? <img src={site.logo} alt="" className="brand-logo" /> : <span className="brand-badge">N</span>}
           <span className="brand-name">{site.name}</span>
@@ -184,9 +223,11 @@ export default function App() {
             : !editLoaded ? <div className="empty">加载中…</div>
             : <EditorPage key={editNote?.id || "new"} note={editNote} onCancel={() => go("#")} onSaved={(n) => go(`#note/${n.id}`)} />
         ) : noteId ? (
-          <NoteDetail noteId={Number(noteId)} user={user} onBack={() => go("#")} onEdit={openEdit} onDeleted={() => go("#")} />
+          <NoteDetail noteId={Number(noteId)} user={user} onBack={() => go("#")} onEdit={openEdit} onDeleted={() => go("#")}
+            focusComments={commentFocus === Number(noteId)} onAuthRequest={() => setAuthOpen(true)} />
         ) : (
-          <HomePage user={user} site={site} onOpenNote={openNote} />
+          <HomePage user={user} site={site} onOpenNote={openNote} onComment={openComment}
+            drawerOpen={drawerOpen} onCloseDrawer={() => setDrawerOpen(false)} onOpenAuth={() => setAuthOpen(true)} />
         )}
       </main>
 
@@ -196,7 +237,11 @@ export default function App() {
         {site.icp && <a className="icp-link" href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">{site.icp}</a>}
       </footer>
 
-      {authOpen && <AuthDialog site={site} onClose={() => setAuthOpen(false)} onAuthed={(u) => { setUser(u); }} />}
+      {authOpen && (
+        <AuthDialog site={site}
+          onClose={() => { setAuthOpen(false); setPendingComment(null); }}
+          onAuthed={onAuthed} />
+      )}
     </div>
   );
 }

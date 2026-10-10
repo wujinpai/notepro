@@ -73,6 +73,7 @@ CREATE TABLE IF NOT EXISTS notes (
   visibility TEXT NOT NULL DEFAULT 'public',
   pinned INTEGER NOT NULL DEFAULT 0,
   archived INTEGER NOT NULL DEFAULT 0,
+  allow_comments INTEGER NOT NULL DEFAULT 1,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
@@ -96,6 +97,28 @@ CREATE TABLE IF NOT EXISTS visits (
   path TEXT NOT NULL DEFAULT '',
   created_at INTEGER NOT NULL
 );
+`);
+
+// 迁移：notes 增加 share_token 列（随机不可猜；老数据在首次获取分享信息时按需生成）
+const noteCols = db.prepare("PRAGMA table_info(notes)").all() as unknown as { name: string }[];
+if (!noteCols.some((c) => c.name === "share_token")) {
+  db.exec("ALTER TABLE notes ADD COLUMN share_token TEXT NOT NULL DEFAULT ''");
+}
+db.exec("CREATE INDEX IF NOT EXISTS idx_notes_share_token ON notes(share_token)");
+
+// 迁移：notes 增加 allow_comments（默认开启）；新增 comments 表
+if (!noteCols.some((c) => c.name === "allow_comments")) {
+  db.exec("ALTER TABLE notes ADD COLUMN allow_comments INTEGER NOT NULL DEFAULT 1");
+}
+db.exec(`
+CREATE TABLE IF NOT EXISTS comments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  note_id INTEGER NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  content TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_comments_note ON comments(note_id, created_at);
 `);
 
 export function getSetting(key: string, def = ""): string {

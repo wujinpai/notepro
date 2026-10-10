@@ -7,6 +7,11 @@ export interface NoteInfo {
   id: number; userId: number; title: string; content: string; tags: string[];
   weather: string; location: string; visibility: string; pinned: boolean; archived: boolean;
   createdAt: number; updatedAt: number; author: AuthorInfo | null;
+  allowComments: boolean; commentCount: number;
+}
+export interface CommentInfo {
+  id: number; noteId: number; userId: number; content: string; createdAt: number;
+  author: AuthorInfo | null;
 }
 export interface SiteInfo {
   name: string; subtitle: string; description: string; keywords: string; footer: string;

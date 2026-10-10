@@ -4,7 +4,7 @@ import multer from "multer";
 import { existsSync, mkdirSync, unlinkSync } from "node:fs";
 import { join, extname } from "node:path";
 import { db, getSetting, setSetting } from "./db.js";
-import { hashPassword, verifyPassword, sha256, encryptSecret, verifyPayload, signPayload, maskEmail } from "./util.js";
+import { hashPassword, verifyPassword, sha256, encryptSecret, verifyPayload, signPayload, maskEmail, randomToken } from "./util.js";
 import { sendEmailCode, verifyEmailCode, createSliderChallenge, verifySlider, consumeTicket, getSmtpConfig, sendMail } from "./mail.js";
 import {
   getUserById, getUserByUsername, getUserByEmail, publicUser, createSession, setSessionCookie, clearSessionCookie,
@@ -338,6 +338,7 @@ app.post("/api/me/sessions/others", requireAuth, (req, res) => { destroyOtherSes
 interface NoteRow {
   id: number; user_id: number; title: string; content: string; tags: string; weather: string; location: string;
   visibility: string; pinned: number; archived: number; created_at: number; updated_at: number;
+  share_token: string; allow_comments: number;
 }
 function noteJson(n: NoteRow, withAuthor = true) {
   const author = withAuthor ? getUserById(n.user_id) : undefined;
@@ -346,6 +347,8 @@ function noteJson(n: NoteRow, withAuthor = true) {
     tags: JSON.parse(n.tags || "[]") as string[],
     weather: n.weather, location: n.location, visibility: n.visibility,
     pinned: !!n.pinned, archived: !!n.archived, createdAt: n.created_at, updatedAt: n.updated_at,
+    allowComments: n.allow_comments !== 0,
+    commentCount: (db.prepare("SELECT COUNT(*) c FROM comments WHERE note_id=?").get(n.id) as { c: number }).c,
     author: author ? { id: author.id, username: author.username, nickname: author.nickname || author.username, avatar: author.avatar } : null,
   };
 }
@@ -388,6 +391,83 @@ app.get("/api/notes/:id", (req, res) => {
   if (!n || !visibleNote(req, n)) return fail(res, 404, "笔记不存在或不可见");
   ok(res, { note: noteJson(n) });
 });
+
+// ---------- 分享链接（token 即凭证：私密笔记也可凭链接查看，但不进广场/搜索） ----------
+function ensureShareToken(n: NoteRow): string {
+  if (n.share_token) return n.share_token;
+  const t = randomToken(24);
+  db.prepare("UPDATE notes SET share_token=? WHERE id=?").run(t, n.id);
+  return t;
+}
+app.get("/api/notes/:id/share", (req, res) => {
+  const n = db.prepare("SELECT * FROM notes WHERE id=?").get(Number(req.params.id)) as NoteRow | undefined;
+  if (!n) return fail(res, 404, "笔记不存在");
+  const me = getSessionUser(req);
+  const isAuthor = !!me && me.id === n.user_id;
+  if (n.visibility === "public" && !n.archived) {
+    const author = getUserById(n.user_id);
+    if (!author || author.status !== "active") return fail(res, 404, "笔记不存在或不可见");
+  } else if (!isAuthor) {
+    // 私密/归档笔记的分享信息仅作者可取
+    return fail(res, 404, "笔记不存在或不可见");
+  }
+  const token = ensureShareToken(n);
+  ok(res, { token, url: `${siteOrigin(req)}/s/${token}`, isAuthor });
+});
+app.post("/api/notes/:id/share/reset", requireAuth, (req, res) => {
+  const n = db.prepare("SELECT * FROM notes WHERE id=?").get(Number(req.params.id)) as NoteRow | undefined;
+  if (!n || n.user_id !== authedUser(req).id) return fail(res, 404, "笔记不存在");
+  const token = randomToken(24);
+  db.prepare("UPDATE notes SET share_token=? WHERE id=?").run(token, n.id);
+  ok(res, { token, url: `${siteOrigin(req)}/s/${token}`, isAuthor: true });
+});
+app.get("/api/share/:token", (req, res) => {
+  const token = String(req.params.token || "");
+  if (!token) return fail(res, 404, "链接不存在或已失效");
+  const n = db.prepare("SELECT * FROM notes WHERE share_token=?").get(token) as NoteRow | undefined;
+  if (!n) return fail(res, 404, "链接不存在或已失效");
+  const author = getUserById(n.user_id);
+  if (!author || author.status !== "active") return fail(res, 404, "链接不存在或已失效");
+  ok(res, { note: noteJson(n) });
+});
+
+// ---------- 评论（正文以纯文本存储与渲染，不做 HTML 拼接） ----------
+interface CommentRow { id: number; note_id: number; user_id: number; content: string; created_at: number }
+function commentJson(c: CommentRow) {
+  const a = getUserById(c.user_id);
+  return {
+    id: c.id, noteId: c.note_id, userId: c.user_id, content: c.content, createdAt: c.created_at,
+    author: a ? { id: a.id, username: a.username, nickname: a.nickname || a.username, avatar: a.avatar } : null,
+  };
+}
+app.get("/api/notes/:id/comments", (req, res) => {
+  const n = db.prepare("SELECT * FROM notes WHERE id=?").get(Number(req.params.id)) as NoteRow | undefined;
+  if (!n || !visibleNote(req, n)) return fail(res, 404, "笔记不存在或不可见");
+  if (!n.allow_comments) return ok(res, { comments: [], total: 0, allowComments: false });
+  const rows = db.prepare("SELECT * FROM comments WHERE note_id=? ORDER BY created_at ASC, id ASC LIMIT 500").all(n.id) as unknown as CommentRow[];
+  ok(res, { comments: rows.map(commentJson), total: rows.length, allowComments: true });
+});
+app.post("/api/notes/:id/comments", requireAuth, rateLimit(30, 60_000, "comment"), (req, res) => {
+  const n = db.prepare("SELECT * FROM notes WHERE id=?").get(Number(req.params.id)) as NoteRow | undefined;
+  if (!n || !visibleNote(req, n)) return fail(res, 404, "笔记不存在或不可见");
+  if (!n.allow_comments) return fail(res, 403, "作者已关闭评论");
+  const content = String(req.body?.content || "").trim();
+  if (!content) return fail(res, 400, "评论内容不能为空");
+  if (content.length > 500) return fail(res, 400, "评论最多 500 字");
+  const info = db.prepare("INSERT INTO comments(note_id,user_id,content,created_at) VALUES(?,?,?,?)")
+    .run(n.id, authedUser(req).id, content, Date.now());
+  const c = db.prepare("SELECT * FROM comments WHERE id=?").get(Number(info.lastInsertRowid)) as unknown as CommentRow;
+  ok(res, { comment: commentJson(c) });
+});
+app.delete("/api/comments/:id", requireAuth, (req, res) => {
+  const c = db.prepare("SELECT * FROM comments WHERE id=?").get(Number(req.params.id)) as CommentRow | undefined;
+  if (!c) return fail(res, 404, "评论不存在");
+  const me = authedUser(req);
+  const n = db.prepare("SELECT user_id FROM notes WHERE id=?").get(c.note_id) as { user_id: number } | undefined;
+  if (c.user_id !== me.id && (!n || n.user_id !== me.id) && me.role !== "admin") return fail(res, 403, "无权删除这条评论");
+  db.prepare("DELETE FROM comments WHERE id=?").run(c.id);
+  ok(res);
+});
 const countNoteImages = (content: string) => ((content || "").match(/!\[[^\]]*\]\([^)\s]+\)/g) || []).length;
 app.post("/api/notes", requireAuth, (req, res) => {
   const u = authedUser(req);
@@ -397,9 +477,10 @@ app.post("/api/notes", requireAuth, (req, res) => {
   if (countNoteImages(content) > 9) return fail(res, 400, "每篇独白最多插入 9 张图片");
   const tags = Array.isArray(req.body?.tags) ? (req.body.tags as unknown[]).map((t) => String(t).trim().slice(0, 24)).filter(Boolean).slice(0, 10) : [];
   const now = Date.now();
-  const info = db.prepare("INSERT INTO notes(user_id,title,content,tags,weather,location,visibility,pinned,archived,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)")
+  const info = db.prepare("INSERT INTO notes(user_id,title,content,tags,weather,location,visibility,pinned,archived,allow_comments,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)")
     .run(u.id, title, content, JSON.stringify(tags), String(req.body?.weather || "").slice(0, 30), String(req.body?.location || "").slice(0, 60),
-      req.body?.visibility === "private" ? "private" : "public", req.body?.pinned ? 1 : 0, req.body?.archived ? 1 : 0, now, now);
+      req.body?.visibility === "private" ? "private" : "public", req.body?.pinned ? 1 : 0, req.body?.archived ? 1 : 0,
+      req.body?.allowComments === false ? 0 : 1, now, now);
   const n = db.prepare("SELECT * FROM notes WHERE id=?").get(Number(info.lastInsertRowid)) as unknown as NoteRow;
   ok(res, { note: noteJson(n) });
 });
@@ -410,16 +491,18 @@ app.put("/api/notes/:id", requireAuth, (req, res) => {
   const newContent = String(req.body?.content ?? n.content);
   if (countNoteImages(newContent) > 9) return fail(res, 400, "每篇独白最多插入 9 张图片");
   const tags = Array.isArray(req.body?.tags) ? (req.body.tags as unknown[]).map((t) => String(t).trim().slice(0, 24)).filter(Boolean).slice(0, 10) : JSON.parse(n.tags);
-  db.prepare("UPDATE notes SET title=?,content=?,tags=?,weather=?,location=?,visibility=?,pinned=?,archived=?,updated_at=? WHERE id=?")
+  db.prepare("UPDATE notes SET title=?,content=?,tags=?,weather=?,location=?,visibility=?,pinned=?,archived=?,allow_comments=?,updated_at=? WHERE id=?")
     .run(String(req.body?.title ?? n.title).slice(0, 120), newContent, JSON.stringify(tags),
       String(req.body?.weather ?? n.weather).slice(0, 30), String(req.body?.location ?? n.location).slice(0, 60),
-      req.body?.visibility === "private" ? "private" : "public", req.body?.pinned ? 1 : 0, req.body?.archived ? 1 : 0, Date.now(), n.id);
+      req.body?.visibility === "private" ? "private" : "public", req.body?.pinned ? 1 : 0, req.body?.archived ? 1 : 0,
+      req.body?.allowComments !== undefined ? (req.body.allowComments ? 1 : 0) : n.allow_comments, Date.now(), n.id);
   ok(res, { note: noteJson(db.prepare("SELECT * FROM notes WHERE id=?").get(n.id) as unknown as NoteRow) });
 });
 app.delete("/api/notes/:id", requireAuth, (req, res) => {
   const u = authedUser(req);
   const n = db.prepare("SELECT * FROM notes WHERE id=?").get(Number(req.params.id)) as NoteRow | undefined;
   if (!n || (n.user_id !== u.id && u.role !== "admin")) return fail(res, 404, "笔记不存在");
+  db.prepare("DELETE FROM comments WHERE note_id=?").run(n.id);
   db.prepare("DELETE FROM notes WHERE id=?").run(n.id);
   ok(res);
 });
@@ -510,6 +593,7 @@ app.delete("/api/admin/users/:id", requireAdmin, (req, res) => {
     if (admins <= 1) return fail(res, 400, "不能删除最后一个管理员");
   }
   const files = db.prepare("SELECT path FROM media WHERE user_id=?").all(target.id) as { path: string }[];
+  db.prepare("DELETE FROM comments WHERE user_id=?").run(target.id);
   db.prepare("DELETE FROM users WHERE id=?").run(target.id);
   for (const f of files) { try { unlinkSync(join(STORAGE_DIR, f.path.replace("/uploads/", ""))); } catch { /* ignore */ } }
   ok(res);

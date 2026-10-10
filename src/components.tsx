@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import QRCode from "qrcode";
 import { api, fmtTime, type NoteInfo, type SiteInfo, type UserInfo } from "./api";
 import { excerpt, imagesOf } from "./md";
 
@@ -229,6 +230,71 @@ export function AuthDialog({ site, onClose, onAuthed }: { site: SiteInfo; onClos
   );
 }
 
+// ---------- 分享弹窗（链接 + 二维码，作者可重置） ----------
+export interface ShareInfo { token: string; url: string; isAuthor: boolean }
+export function ShareDialog({ note, onClose }: { note: NoteInfo; onClose: () => void }) {
+  const [info, setInfo] = useState<ShareInfo | null>(null);
+  const [qr, setQr] = useState("");
+  const [error, setError] = useState("");
+  const [copied, setCopied] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    let dead = false;
+    api.get<ShareInfo>(`/api/notes/${note.id}/share`)
+      .then((d) => { if (!dead) setInfo(d); })
+      .catch((e) => { if (!dead) setError((e as Error).message); });
+    return () => { dead = true; };
+  }, [note.id]);
+
+  useEffect(() => {
+    if (!info) { setQr(""); return; }
+    QRCode.toDataURL(info.url, { width: 220, margin: 1 }).then(setQr).catch(() => setQr(""));
+  }, [info]);
+
+  const copy = async () => {
+    if (!info) return;
+    try { await navigator.clipboard.writeText(info.url); }
+    catch { inputRef.current?.select(); document.execCommand?.("copy"); }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1600);
+  };
+  const reset = async () => {
+    if (!confirm("重置后，旧的分享链接将立即失效。确定重置？")) return;
+    setBusy(true); setError("");
+    try {
+      const d = await api.post<ShareInfo>(`/api/notes/${note.id}/share/reset`);
+      setInfo(d); setCopied(false);
+    } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
+  };
+
+  return (
+    <Modal title="分享" onClose={onClose}>
+      {error && <p className="err-text">{error}</p>}
+      {!info && !error && <p className="muted">正在生成分享链接…</p>}
+      {info && (
+        <>
+          <div className="share-link-row">
+            <input ref={inputRef} readOnly value={info.url} aria-label="分享链接" onFocus={(e) => e.target.select()} />
+            <button type="button" className="btn btn-ghost" onClick={() => void copy()}>{copied ? "已复制" : "复制"}</button>
+          </div>
+          {qr && (
+            <div className="share-qr">
+              <img src={qr} alt="分享二维码" />
+              <span className="muted tiny">扫码打开这篇独白</span>
+            </div>
+          )}
+          <div className="share-foot-row">
+            <span className="muted tiny">任何人凭此链接可查看{note.visibility === "private" ? "这篇私密独白" : "这篇独白"}</span>
+            {info.isAuthor && <button type="button" className="btn btn-danger btn-sm" disabled={busy} onClick={() => void reset()}>重置链接</button>}
+          </div>
+        </>
+      )}
+    </Modal>
+  );
+}
+
 // ---------- 标签输入 ----------
 export function TagInput({ value, onChange, suggestions }: { value: string[]; onChange: (t: string[]) => void; suggestions: string[] }) {
   const [draft, setDraft] = useState("");
@@ -291,9 +357,12 @@ export function imageHit(e: React.MouseEvent): { images: string[]; index: number
 }
 
 // ---------- 笔记卡片 ----------
-export function NoteCard({ note, onOpen }: { note: NoteInfo; onOpen: (n: NoteInfo) => void }) {
+export function NoteCard({ note, onOpen, onComment }: {
+  note: NoteInfo; onOpen: (n: NoteInfo) => void; onComment: (n: NoteInfo) => void;
+}) {
   const imgs = imagesOf(note.content);
   const [lb, setLb] = useState<{ images: string[]; index: number } | null>(null);
+  const [shareOpen, setShareOpen] = useState(false);
   return (
     <>
     <article className="note-card" onClick={() => onOpen(note)}>
@@ -324,8 +393,19 @@ export function NoteCard({ note, onOpen }: { note: NoteInfo; onOpen: (n: NoteInf
         </div>
       )}
       {note.tags.length > 0 && <div className="tag-row">{note.tags.map((t) => <span key={t} className="chip">#{t}</span>)}</div>}
+      <div className="note-card-foot">
+        {note.allowComments ? (
+          <button type="button" className="text-btn" onClick={(e) => { e.stopPropagation(); onComment(note); }}>
+            评论{note.commentCount > 0 ? ` · ${note.commentCount}` : ""}
+          </button>
+        ) : (
+          <span className="muted tiny">评论已关闭</span>
+        )}
+        <button type="button" className="text-btn share-act" onClick={(e) => { e.stopPropagation(); setShareOpen(true); }}>分享</button>
+      </div>
     </article>
     {lb && <Lightbox images={lb.images} index={lb.index} onClose={() => setLb(null)} />}
+    {shareOpen && <ShareDialog note={note} onClose={() => setShareOpen(false)} />}
     </>
   );
 }

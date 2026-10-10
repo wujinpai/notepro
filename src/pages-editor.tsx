@@ -15,6 +15,7 @@ export function EditorPage({ note, onSaved, onCancel }: {
   const [visibility, setVisibility] = useState(note?.visibility || "public");
   const [pinned, setPinned] = useState(!!note?.pinned);
   const [archived, setArchived] = useState(!!note?.archived);
+  const [allowComments, setAllowComments] = useState(note?.allowComments ?? true);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -102,7 +103,7 @@ export function EditorPage({ note, onSaved, onCancel }: {
   const save = async () => {
     setBusy(true); setError("");
     try {
-      const body = { title, content, tags, weather, location, visibility, pinned, archived };
+      const body = { title, content, tags, weather, location, visibility, pinned, archived, allowComments };
       const d = note
         ? await api.put<{ note: NoteInfo }>(`/api/notes/${note.id}`, body)
         : await api.post<{ note: NoteInfo }>("/api/notes", body);
@@ -171,6 +172,7 @@ export function EditorPage({ note, onSaved, onCancel }: {
           </div>
           <label className="check"><input type="checkbox" checked={pinned} onChange={(e) => setPinned(e.target.checked)} /> 置顶</label>
           <label className="check"><input type="checkbox" checked={archived} onChange={(e) => setArchived(e.target.checked)} /> 归档（不在广场出现）</label>
+          <label className="check"><input type="checkbox" checked={allowComments} onChange={(e) => setAllowComments(e.target.checked)} /> 允许评论</label>
         </div>
         {error && <p className="err-text">{error}</p>}
       </div>

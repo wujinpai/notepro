@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, fmtTime, type NoteInfo, type SiteInfo, type UserInfo } from "./api";
-import { Avatar, Lightbox, Modal, SliderCaptcha, imageHit } from "./components";
+import { Avatar, Lightbox, Modal, ShareDialog, SliderCaptcha, imageHit } from "./components";
 import { excerpt, renderMarkdown } from "./md";
 
 interface SessionRow { id: number; ua: string; ip: string; created_at: number; current: boolean }
@@ -224,6 +224,7 @@ function MyNotesTab({ onEditNote, onOpenNote }: { onEditNote: (n: NoteInfo) => v
   const [filter, setFilter] = useState("all");
   const [notes, setNotes] = useState<NoteInfo[]>([]);
   const [lb, setLb] = useState<{ images: string[]; index: number } | null>(null);
+  const [shareNote, setShareNote] = useState<NoteInfo | null>(null);
   const load = useCallback(() => {
     api.get<{ notes: NoteInfo[] }>(`/api/me/notes?filter=${filter}`).then((d) => setNotes(d.notes)).catch(() => setNotes([]));
   }, [filter]);
@@ -270,12 +271,14 @@ function MyNotesTab({ onEditNote, onOpenNote }: { onEditNote: (n: NoteInfo) => v
               ? <button className="btn btn-ghost btn-sm" onClick={() => void toggle(n, { visibility: "public" })}>设为公开</button>
               : <button className="btn btn-ghost btn-sm" onClick={() => void toggle(n, { visibility: "private" })}>设为私密</button>}
             <button className="btn btn-ghost btn-sm" onClick={() => void toggle(n, { archived: !n.archived })}>{n.archived ? "取消归档" : "归档"}</button>
+            <button className="btn btn-ghost btn-sm" onClick={() => setShareNote(n)}>分享</button>
             <button className="btn btn-danger btn-sm" onClick={() => void del(n)}>删除</button>
           </div>
         </div>
         );
       })}
       {lb && <Lightbox images={lb.images} index={lb.index} onClose={() => setLb(null)} />}
+      {shareNote && <ShareDialog note={shareNote} onClose={() => setShareNote(null)} />}
     </div>
   );
 }
