@@ -65,6 +65,8 @@ button.act-btn:hover { background: var(--surface); color: var(--text); }
   width: 34px; height: 34px; background: var(--blue); color: #fff; font-weight: 700; font-size: 19px;
   display: inline-flex; align-items: center; justify-content: center; border-radius: var(--r-ctl); flex: none;
 }
+/* 站点信息未就绪时的中性占位：只占位不出默认字样，避免首屏闪蓝 N */
+.brand-badge-blank { background: var(--surface2); }
 .brand-logo { width: 34px; height: 34px; object-fit: contain; border-radius: var(--r-ctl); flex: none; }
 .brand-name { font-size: 19px; font-weight: 600; white-space: nowrap; }
 .brand-sub { color: var(--muted); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -117,6 +119,10 @@ button.act-btn:hover { background: var(--surface); color: var(--text); }
 .ok-text { color: var(--green); font-size: 13px; margin-top: 8px; }
 .empty { padding: 40px 16px; text-align: center; color: var(--muted); }
 .row-gap { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+/* 表单操作按钮行：同组等高同基线，桌面自然宽（移动端等分整行见响应式区）；
+   行内按钮清掉 .panel .btn-primary 的单按钮上边距，避免 margin 撑行高导致同组不等高 */
+.btn-row { display: flex; gap: 10px; align-items: stretch; margin-top: 14px; }
+.btn-row > .btn.btn-primary { margin-top: 0; }
 .stack { display: flex; flex-direction: column; gap: 16px; }
 
 /* 分段控件 */
@@ -175,8 +181,14 @@ a.side-user:hover { border-color: var(--blue); }
 .drawer-foot .btn-block { margin-top: 0; }
 .drawer-search { display: flex; align-items: center; gap: 8px; }
 .drawer-search input { flex: 1; min-width: 0; }
-.drawer-user-zone .drawer-user { margin-bottom: 2px; padding: 2px 8px; }
-.drawer-nav { display: flex; flex-direction: column; gap: 2px; }
+.drawer-user-row { display: flex; align-items: center; gap: 10px; }
+.drawer-user-link {
+  display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0;
+  color: var(--text); padding: 4px 6px; margin-left: -6px; border-radius: var(--r-ctl);
+}
+.drawer-user-link:hover { background: var(--surface); }
+.drawer-logout { flex: none; color: var(--red); font-size: 14px; padding: 8px 6px; margin-right: -6px; border-radius: var(--r-ctl); }
+.drawer-logout:hover { background: var(--surface); }
 .drawer-nav-item {
   display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
   padding: 10px 8px; border-radius: var(--r-ctl); color: var(--text); font-size: 15px;
@@ -185,8 +197,7 @@ a.side-user:hover { border-color: var(--blue); }
 a.drawer-nav-item:hover, button.drawer-nav-item:hover { background: var(--surface); }
 .drawer-nav-item.danger { color: var(--red); }
 .drawer-nav-right { margin-left: auto; }
-.drawer-user { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; color: var(--text); }
-.drawer-user-meta { display: flex; flex-direction: column; min-width: 0; margin-right: auto; }
+.drawer-user-meta { display: flex; flex-direction: column; min-width: 0; }
 .drawer-user-meta strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .drawer-user-meta span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -372,7 +383,13 @@ label.check input { width: auto; }
 .color-dot:hover { transform: scale(1.12); }
 .color-reset { grid-column: 1 / -1; padding: 4px 0 0; font-size: 13px; color: var(--muted); text-align: center; }
 .color-reset:hover { color: var(--text); }
-.seg-wrap { flex-wrap: wrap; }
+/* 分段控件单行横滑：各宽度都不折行，标签不压缩 */
+.seg-scroll {
+  display: flex; flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden;
+  max-width: 100%; scrollbar-width: none;
+}
+.seg-scroll::-webkit-scrollbar { display: none; }
+.seg-scroll button { flex: none; white-space: nowrap; }
 .md-tool-mono { font-family: "Roboto Mono", Consolas, monospace; }
 .swap-preview { padding: 12px; overflow-y: auto; min-height: 359px; max-height: 560px; }
 .editor-options { margin-top: 14px; display: flex; flex-direction: column; gap: 12px; }
@@ -386,9 +403,11 @@ label.check input { width: auto; }
 /* 用户中心 / 后台 */
 .me-layout { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 20px; align-items: start; }
 .me-nav { display: flex; flex-direction: column; gap: 4px; border: 1px solid var(--border); border-radius: var(--r-card); padding: 12px; background: var(--card); box-shadow: var(--shadow-card); }
-.me-nav > button { text-align: left; padding: 9px 12px; border-radius: var(--r-ctl); color: var(--text); }
-.me-nav > button:hover { background: var(--surface); }
-.me-nav > button.on { background: var(--chip); color: var(--blue); font-weight: 500; }
+/* 桌面端 display:contents 让标签仍是竖排导航的直接子项；移动端切换为单行横滑条（见响应式区） */
+.me-tabs { display: contents; }
+.me-nav .me-tabs > button { text-align: left; padding: 9px 12px; border-radius: var(--r-ctl); color: var(--text); }
+.me-nav .me-tabs > button:hover { background: var(--surface); }
+.me-nav .me-tabs > button.on { background: var(--chip); color: var(--blue); font-weight: 500; }
 .me-card-brief { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 10px 0 14px; border-bottom: 1px solid var(--border); margin-bottom: 8px; text-align: center; }
 .me-main { min-width: 0; }
 .panel { border: 1px solid var(--border); border-radius: var(--r-card); padding: 18px; background: var(--card); box-shadow: var(--shadow-card); min-width: 0; }
@@ -433,8 +452,17 @@ th { color: var(--muted); font-weight: 500; font-size: 13px; }
   /* iOS 聚焦字号小于 16px 的控件会自动放大页面，移动端强制不低于 16px */
   input, textarea, select { font-size: 16px !important; }
   .me-layout { grid-template-columns: minmax(0, 1fr); }
-  .me-nav { flex-direction: row; flex-wrap: wrap; align-items: center; }
+  /* 移动端用户中心：简要卡在上，选择栏改单行左右滑动，不再折成上下两排 */
+  .me-nav { flex-direction: column; }
+  .me-tabs {
+    display: flex; flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden;
+    gap: 4px; padding: 2px; margin: 0 -2px; scrollbar-width: none;
+  }
+  .me-tabs::-webkit-scrollbar { display: none; }
+  .me-tabs > button { flex: none; white-space: nowrap; }
   .me-card-brief { flex-direction: row; border-bottom: none; margin: 0; padding: 4px; width: 100%; text-align: left; }
+  /* 表单操作按钮：移动端一行内等分整行 */
+  .btn-row .btn { flex: 1 1 0; }
   .editor-main { grid-template-columns: minmax(0, 1fr); }
   .opt-grid { grid-template-columns: minmax(0, 1fr); }
   .stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }

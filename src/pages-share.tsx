@@ -1,17 +1,18 @@
 import { useEffect, useState } from "react";
-import { api, fmtTime, type NoteInfo, type SiteInfo } from "./api";
+import { api, bootSite, cacheSite, fmtTime, type NoteInfo, type SiteInfo } from "./api";
 import { Avatar, Lightbox, imageHit } from "./components";
 import { renderMarkdown } from "./md";
 
 // 独立分享页（/s/<token> 真实路径）：极简品牌行 + 笔记正文 + 页脚备案，无任何作者控件
 export function SharePage({ token }: { token: string }) {
-  const [site, setSite] = useState<SiteInfo | null>(null);
+  // 初始站点信息与主应用同口径：服务端注入/本地缓存，未就绪时品牌区只占位，不闪蓝 N 与默认名
+  const [site, setSite] = useState<SiteInfo | null>(() => bootSite());
   const [note, setNote] = useState<NoteInfo | null>(null);
   const [state, setState] = useState<"loading" | "ok" | "bad">("loading");
   const [lb, setLb] = useState<{ images: string[]; index: number } | null>(null);
 
   useEffect(() => {
-    api.get<SiteInfo>("/api/site").then(setSite).catch(() => undefined);
+    api.get<SiteInfo>("/api/site").then((d) => { setSite(d); cacheSite(d); }).catch(() => undefined);
   }, []);
   useEffect(() => {
     let dead = false;
@@ -29,8 +30,8 @@ export function SharePage({ token }: { token: string }) {
       <a className="share-brand" href="/">
         {site?.logo
           ? <img src={site.logo} alt="" className="brand-logo" />
-          : <span className="brand-badge">{(site?.name || "N").slice(0, 1)}</span>}
-        <span className="brand-name">{site?.name || "NotePro"}</span>
+          : site?.name ? <span className="brand-badge">{site.name.slice(0, 1)}</span> : <span className="brand-badge brand-badge-blank" aria-hidden="true" />}
+        <span className="brand-name">{site?.name || ""}</span>
         {site?.subtitle && <span className="brand-sub">{site.subtitle}</span>}
       </a>
 
@@ -79,7 +80,7 @@ export function SharePage({ token }: { token: string }) {
       </main>
 
       <footer className="site-footer">
-        <span>{site?.name || "NotePro"}{site?.subtitle ? ` · ${site.subtitle}` : ""}</span>
+        <span>{site?.name || ""}{site?.subtitle ? ` · ${site.subtitle}` : ""}</span>
         {site?.footer && <span>{site.footer}</span>}
         {site?.icp && (
           <a className="icp-link" href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">{site.icp}</a>

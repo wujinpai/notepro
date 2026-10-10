@@ -150,7 +150,7 @@ export function HomePage({ user, site, onOpenNote, onComment, q, onSearch, theme
           <div className="side-card side-user">
             {site.logo
               ? <img src={site.logo} alt="" className="brand-logo" />
-              : <span className="brand-badge">{(site.name || "N").slice(0, 1)}</span>}
+              : site.name ? <span className="brand-badge">{site.name.slice(0, 1)}</span> : <span className="brand-badge brand-badge-blank" aria-hidden="true" />}
             <span className="side-user-meta">
               <strong>{site.name}</strong>
               <span className="muted tiny">{site.subtitle || site.description || "多用户笔记广场"}</span>
@@ -197,7 +197,7 @@ export function HomePage({ user, site, onOpenNote, onComment, q, onSearch, theme
         <button type="button" className="drawer-site" onClick={() => { onCloseDrawer(); window.scrollTo(0, 0); }}>
           {site.logo
             ? <img src={site.logo} alt="" className="brand-logo" />
-            : <span className="brand-badge">{(site.name || "N").slice(0, 1)}</span>}
+            : site.name ? <span className="brand-badge">{site.name.slice(0, 1)}</span> : <span className="brand-badge brand-badge-blank" aria-hidden="true" />}
           <span className="brand-name">{site.name}</span>
           {site.subtitle && <span className="brand-sub">{site.subtitle}</span>}
         </button>
@@ -234,18 +234,15 @@ export function HomePage({ user, site, onOpenNote, onComment, q, onSearch, theme
         </div>
         <div className="drawer-foot">
           {user ? (
-            <div className="drawer-user-zone">
-              <div className="drawer-user">
+            <div className="drawer-user-row">
+              <a className="drawer-user-link" href="#me" onClick={onCloseDrawer} aria-label="进入用户中心">
                 <Avatar url={user.avatar} name={user.nickname} size={40} />
                 <span className="drawer-user-meta">
                   <strong>{user.nickname}</strong>
                   <span className="muted tiny">@{user.username}</span>
                 </span>
-              </div>
-              <nav className="drawer-nav">
-                <a className="drawer-nav-item" href="#me" onClick={onCloseDrawer}>用户中心</a>
-                <button type="button" className="drawer-nav-item danger" onClick={() => { onCloseDrawer(); onLogout(); }}>退出登录</button>
-              </nav>
+              </a>
+              <button type="button" className="drawer-logout" onClick={() => { onCloseDrawer(); onLogout(); }}>退出登录</button>
             </div>
           ) : (
             <button type="button" className="btn btn-primary btn-block" onClick={() => { onCloseDrawer(); onOpenAuth(); }}>登录 / 注册</button>

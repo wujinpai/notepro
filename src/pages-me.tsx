@@ -39,11 +39,13 @@ export function MePage({ user, site, refreshUser, onEditNote, onOpenNote }: {
           <strong>{user.nickname}</strong>
           <span className="muted tiny">@{user.username} · ID {user.id}{user.role === "admin" ? " · 管理员" : ""}</span>
         </div>
-        <button className={tab === "profile" ? "on" : ""} onClick={() => setTab("profile")}>个人资料</button>
-        <button className={tab === "security" ? "on" : ""} onClick={() => setTab("security")}>账号安全</button>
-        <button className={tab === "notes" ? "on" : ""} onClick={() => setTab("notes")}>我的独白</button>
-        <button className={tab === "accounts" ? "on" : ""} onClick={() => setTab("accounts")}>第三方账号</button>
-        {user.role === "admin" && <button className={tab === "admin" ? "on" : ""} onClick={() => setTab("admin")}>管理后台</button>}
+        <div className="me-tabs">
+          <button className={tab === "profile" ? "on" : ""} onClick={() => setTab("profile")}>个人资料</button>
+          <button className={tab === "security" ? "on" : ""} onClick={() => setTab("security")}>账号安全</button>
+          <button className={tab === "notes" ? "on" : ""} onClick={() => setTab("notes")}>我的独白</button>
+          <button className={tab === "accounts" ? "on" : ""} onClick={() => setTab("accounts")}>第三方账号</button>
+          {user.role === "admin" && <button className={tab === "admin" ? "on" : ""} onClick={() => setTab("admin")}>管理后台</button>}
+        </div>
       </aside>
       <section className="me-main">
         {tab === "profile" && <ProfileTab user={user} refreshUser={refreshUser} />}

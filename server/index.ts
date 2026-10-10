@@ -1,7 +1,7 @@
 import express from "express";
 import type { Request, Response } from "express";
 import multer from "multer";
-import { existsSync, mkdirSync, unlinkSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, unlinkSync } from "node:fs";
 import { join, extname } from "node:path";
 import { db, getSetting, setSetting } from "./db.js";
 import { hashPassword, verifyPassword, sha256, encryptSecret, verifyPayload, signPayload, maskEmail, randomToken } from "./util.js";
@@ -45,10 +45,10 @@ function siteOrigin(req: Request): string {
   const proto = (req.headers["x-forwarded-proto"] as string) || req.protocol || "http";
   return `${proto}://${req.headers.host}`;
 }
-app.get("/api/site", (req, res) => {
+function sitePayload() {
   const oauth: string[] = [];
   for (const p of PROVIDERS) if (getProviderConfig(p).enabled && getSetting("oauth_show_login", "1") === "1") oauth.push(p);
-  ok(res, {
+  return {
     name: getSetting("site_name", "己素"),
     subtitle: getSetting("site_subtitle", "Jisu"),
     description: getSetting("site_description", "己素 Jisu：多用户笔记广场，记录、分享与发现。"),
@@ -58,8 +58,13 @@ app.get("/api/site", (req, res) => {
     logo: getSetting("site_logo", ""),
     registerOpen: getSetting("site_register_open", "1") === "1",
     oauthProviders: oauth,
-  });
-});
+  };
+}
+app.get("/api/site", (_req, res) => ok(res, sitePayload()));
+
+// 标签页图标：站长已在后台上传 Logo 时用 Logo，未设置时退回随包默认图标（?v=2  bust 旧缓存）
+const DEFAULT_ICON = "/favicon-32.png?v=2";
+const effectiveIcon = (): string => getSetting("site_logo", "") || DEFAULT_ICON;
 
 // ---------- 滑块 ----------
 app.get("/api/auth/slider", rateLimit(60, 60_000, "slider"), (_req, res) => {
@@ -691,12 +696,36 @@ app.post("/api/admin/oauth/test", requireAdmin, (req, res) => {
 app.get("/api/health", (_req, res) => ok(res, { time: Date.now() }));
 
 // ---------- 前端静态与 SPA 回退 ----------
+// 部分浏览器会兜底请求 /favicon.ico，统一跳到当前生效图标
+app.get("/favicon.ico", (_req, res) => {
+  res.set("Cache-Control", "no-cache");
+  res.redirect(302, effectiveIcon());
+});
+
 const PUBLIC_DIR = join(process.cwd(), "dist", "public");
 if (existsSync(PUBLIC_DIR)) {
-  app.use(express.static(PUBLIC_DIR, { maxAge: "1h" }));
+  // index:false 关掉静态目录直出首页：所有 HTML 统一经 renderIndex 注入站点信息，
+  // 第一帧就是后台设置的站点名/Logo/标签图标，不再先闪默认「己素」与蓝 N，也省一次 /api/site 往返
+  app.use(express.static(PUBLIC_DIR, { maxAge: "1h", index: false }));
+  let indexCache: string | null = null;
+  const escHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  const renderIndex = (): string => {
+    if (indexCache === null) indexCache = readFileSync(join(PUBLIC_DIR, "index.html"), "utf8");
+    const s = sitePayload();
+    const icon = escHtml(effectiveIcon());
+    const title = escHtml(s.subtitle ? `${s.name} - ${s.subtitle}` : s.name);
+    const boot = JSON.stringify(s).replace(/</g, "\\u003c");
+    return indexCache
+      .replace(/<title>[^<]*<\/title>/, `<title>${title}</title>`)
+      .replace(/(<meta name="description" content=")[^"]*(")/, `$1${escHtml(s.description)}$2`)
+      .replace(/<link rel="icon"[^>]*>/, `<link rel="icon" href="${icon}" />`)
+      .replace(/<link rel="apple-touch-icon"[^>]*>/, `<link rel="apple-touch-icon" href="${icon}" />`)
+      .replace("</head>", `<script>window.__NP_SITE__=${boot}</script></head>`);
+  };
   app.get("*", (req, res, next) => {
     if (req.path.startsWith("/api/") || req.path.startsWith("/uploads/")) return next();
-    res.sendFile(join(PUBLIC_DIR, "index.html"));
+    res.set("Cache-Control", "no-cache");
+    res.type("html").send(renderIndex());
   });
 }
 

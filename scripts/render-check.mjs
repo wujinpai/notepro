@@ -3,8 +3,9 @@
 // 抽屉登录区精简、管理后台并入用户中心（#admin 深链、普通用户不可见）、我的独白更名与无标题不造假标题
 import { spawn } from "node:child_process";
 import { chromium } from "playwright-core";
-import { rmSync, mkdirSync } from "node:fs";
+import { rmSync, mkdirSync, readFileSync } from "node:fs";
 import { globSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 const PORT = 3103;
 const BASE = `http://127.0.0.1:${PORT}`;
@@ -53,6 +54,20 @@ function makeClient() {
 
 async function main() {
   for (let i = 0; i < 50; i++) { try { const r = await fetch(`${BASE}/api/health`); if (r.ok) break; } catch {} await sleep(200); }
+  let fails = 0, assertFails = 0;
+  const expect = (name, cond, extra = "") => {
+    console.log(`${cond ? "✓" : "✗"} ${name}${cond ? "" : ` ${extra}`}`);
+    if (!cond) assertFails++;
+  };
+
+  // ---------- 未设置 Logo 时的默认图标链路（真实 HTTP 响应核查） ----------
+  const rawHome0 = await (await fetch(BASE + "/")).text();
+  expect("默认图标：未设 Logo 时 icon 链接为随包默认图（?v=2）", rawHome0.includes('<link rel="icon" href="/favicon-32.png?v=2"'), rawHome0.slice(0, 300));
+  const ico0 = await fetch(BASE + "/favicon.ico", { redirect: "manual" });
+  expect("默认图标：/favicon.ico 302 跳到默认图标", ico0.status === 302 && (ico0.headers.get("location") || "").includes("/favicon-32.png"), `${ico0.status} ${ico0.headers.get("location")}`);
+  const fav0 = await fetch(BASE + "/favicon-32.png");
+  const fav0Buf = Buffer.from(await fav0.arrayBuffer());
+  expect("默认图标：随包图标 200 且为 PNG 字节", fav0.status === 200 && (fav0.headers.get("content-type") || "").includes("png") && fav0Buf.subarray(1, 4).toString() === "PNG", `${fav0.status} ${fav0.headers.get("content-type")} ${fav0Buf.length}`);
 
   const admin = makeClient();
   await admin.register("render", "render@example.com", "render123");
@@ -80,13 +95,28 @@ async function main() {
   const adminToken = admin.jar.get("np_session");
   const bobToken = bob.jar.get("np_session");
 
+  // ---------- 站长改名 + 上传 Logo 后：注入 HTML 与图标链路（真实 HTTP 核查） ----------
+  const siteCfg = (await admin.req("GET", "/api/admin/site")).json;
+  await admin.req("PUT", "/api/admin/site", { ...siteCfg, name: "渲染站" });
+  const logoBytes = readFileSync(fileURLToPath(new URL("../public/favicon-32.png", import.meta.url)));
+  const fd = new FormData();
+  fd.append("file", new Blob([logoBytes], { type: "image/png" }), "testlogo.png");
+  const upRes = await fetch(BASE + "/api/admin/logo", { method: "POST", headers: { Cookie: `np_session=${adminToken}` }, body: fd });
+  const upJson = await upRes.json().catch(() => null);
+  expect("后台：Logo 上传成功", upRes.status === 200 && !!upJson?.path, `${upRes.status} ${JSON.stringify(upJson)}`);
+  const homeHtml = await (await fetch(BASE + "/")).text();
+  expect("首屏注入：<title> 已是后台站点名", homeHtml.includes("<title>渲染站 - Jisu</title>"), homeHtml.slice(0, 300));
+  expect("首屏注入：HTML 内含 window.__NP_SITE__ 真实站点名", homeHtml.includes("__NP_SITE__") && homeHtml.includes("渲染站"), "");
+  const iconMatch = homeHtml.match(/<link rel="icon" href="([^"]+)"/);
+  expect("首屏注入：favicon 链接指向已上传 Logo", !!iconMatch && iconMatch[1].includes("/uploads/images/"), iconMatch?.[1] || "none");
+  const iconRes = await fetch(BASE + (iconMatch?.[1] || "/favicon-32.png"));
+  const iconBuf = Buffer.from(await iconRes.arrayBuffer());
+  expect("favicon：Logo 图标 URL 200 且为图片字节", iconRes.status === 200 && (iconRes.headers.get("content-type") || "").includes("image") && iconBuf.length > 100, `${iconRes.status} ${iconRes.headers.get("content-type")} ${iconBuf.length}B`);
+  const icoRes = await fetch(BASE + "/favicon.ico", { redirect: "manual" });
+  expect("/favicon.ico：302 跳到已上传 Logo", icoRes.status === 302 && (icoRes.headers.get("location") || "").includes("/uploads/images/"), `${icoRes.status} ${icoRes.headers.get("location")}`);
+
   const exe = globSync(process.env.HOME + "/.cache/ms-playwright/chromium_headless_shell-*/chrome-linux/headless_shell")[0];
   const browser = await chromium.launch({ executablePath: exe });
-  let fails = 0, assertFails = 0;
-  const expect = (name, cond, extra = "") => {
-    console.log(`${cond ? "✓" : "✗"} ${name}${cond ? "" : ` ${extra}`}`);
-    if (!cond) assertFails++;
-  };
   async function shot(page, name, width) {
     await page.waitForTimeout(600);
     const metrics = await page.evaluate(() => ({
@@ -155,17 +185,27 @@ async function main() {
 
   await page.goto(BASE + "/#me", { waitUntil: "networkidle" });
   await shot(page, "user-center", 1366);
-  const navTexts = (await page.locator(".me-nav > button").allTextContents()).map((t) => t.trim());
+  const navTexts = (await page.locator(".me-nav .me-tabs > button").allTextContents()).map((t) => t.trim());
   expect("桌面管理员：用户中心标签序 个人资料/账号安全/我的独白/第三方账号/管理后台",
     JSON.stringify(navTexts) === JSON.stringify(["个人资料", "账号安全", "我的独白", "第三方账号", "管理后台"]), navTexts.join("/"));
-  await page.locator(".me-nav > button", { hasText: "管理后台" }).click();
+  await page.locator(".me-nav .me-tabs > button", { hasText: "管理后台" }).click();
   await page.locator(".me-main .stat-card").first().waitFor({ timeout: 5000 }).catch(() => {});
   const segTexts = (await page.locator(".me-main .seg button").allTextContents()).map((t) => t.trim());
   expect("桌面管理员：后台六个子标签齐全", ["概览", "用户管理", "内容管理", "站点设置", "邮箱设置", "第三方登录"].every((x) => segTexts.some((t) => t === x)), segTexts.join("/"));
   const statCount = await page.locator(".me-main .stat-card").count();
   expect("桌面管理员：后台概览统计卡 6 张（功能完整）", statCount === 6, `got ${statCount}`);
 
-  await page.locator(".me-nav > button", { hasText: "我的独白" }).click();
+  // 后台按钮行（第三方登录页）：桌面同行等高
+  await page.locator(".me-main .seg button", { hasText: "第三方登录" }).click();
+  await page.waitForTimeout(600);
+  const dBtnRow = await page.evaluate(() => {
+    const row = document.querySelector(".me-main .btn-row");
+    if (!row) return null;
+    return [...row.querySelectorAll(".btn")].map((b) => { const r = b.getBoundingClientRect(); return { w: Math.round(r.width), h: Math.round(r.height) }; });
+  });
+  expect("桌面后台：保存/测试按钮同行等高", !!dBtnRow && dBtnRow.length === 2 && dBtnRow[0].h === dBtnRow[1].h && dBtnRow[0].h > 0, JSON.stringify(dBtnRow));
+
+  await page.locator(".me-nav .me-tabs > button", { hasText: "我的独白" }).click();
   await page.waitForTimeout(600);
   const listCheck = await page.evaluate(() => {
     const items = [...document.querySelectorAll(".my-note-item")];
@@ -195,7 +235,7 @@ async function main() {
   await page.locator(".me-main .stat-card").first().waitFor({ timeout: 5000 }).catch(() => {});
   await shot(page, "admin", 1366);
   const adminDeep = await page.evaluate(() => {
-    const nav = [...document.querySelectorAll(".me-nav > button")].find((b) => b.textContent.includes("管理后台"));
+    const nav = [...document.querySelectorAll(".me-nav .me-tabs > button")].find((b) => b.textContent.includes("管理后台"));
     return { tabOn: !!nav && nav.classList.contains("on"), hasStats: !!document.querySelector(".me-main .stat-card") };
   });
   expect("桌面管理员：#admin 深链直达用户中心「管理后台」标签（不死链）", adminDeep.tabOn && adminDeep.hasStats, JSON.stringify(adminDeep));
@@ -242,16 +282,48 @@ async function main() {
   await ctx.addCookies([{ name: "np_session", value: bobToken, domain: "127.0.0.1", path: "/" }]);
   page = await ctx.newPage();
   await page.goto(BASE + "/#me", { waitUntil: "networkidle" });
-  const bobNav = (await page.locator(".me-nav > button").allTextContents()).map((t) => t.trim());
+  const bobNav = (await page.locator(".me-nav .me-tabs > button").allTextContents()).map((t) => t.trim());
   expect("桌面普通用户：用户中心无「管理后台」标签", !bobNav.some((t) => t.includes("管理后台")), bobNav.join("/"));
   await page.goto(BASE + "/#admin", { waitUntil: "networkidle" });
   await page.waitForTimeout(400);
   const bobAdmin = await page.evaluate(() => ({
-    hasAdminTab: [...document.querySelectorAll(".me-nav > button")].some((b) => b.textContent.includes("管理后台")),
+    hasAdminTab: [...document.querySelectorAll(".me-nav .me-tabs > button")].some((b) => b.textContent.includes("管理后台")),
     hasStat: !!document.querySelector(".me-main .stat-card"),
     hasProfilePanel: !!document.querySelector(".me-main .panel"),
   }));
   expect("桌面普通用户：#admin 不死链且无后台内容", !bobAdmin.hasAdminTab && !bobAdmin.hasStat && bobAdmin.hasProfilePanel, JSON.stringify(bobAdmin));
+  await ctx.close();
+
+  // ---------- 慢网首帧（/api/site 人为延迟）：品牌区第一帧即真值，不闪「己素」与蓝 N ----------
+  ctx = await browser.newContext({ viewport: { width: 1366, height: 900 } });
+  page = await ctx.newPage();
+  await page.route("**/api/site", async (route) => { await sleep(2500); await route.continue(); });
+  await page.goto(BASE + "/", { waitUntil: "commit" });
+  await page.waitForSelector(".brand", { timeout: 5000 }).catch(() => {});
+  await page.waitForTimeout(500);
+  const firstPaint = await page.evaluate(() => ({
+    title: document.title,
+    name: document.querySelector(".brand-name")?.textContent || "",
+    hasLogoImg: !!document.querySelector(".brand img.brand-logo"),
+    logoSrc: document.querySelector(".brand img.brand-logo")?.getAttribute("src") || "",
+    hasBadge: !!document.querySelector(".brand .brand-badge"),
+    iconHref: document.querySelector('link[rel="icon"]')?.getAttribute("href") || "",
+  }));
+  expect("慢网首帧：标题与站名首帧即真值（不闪己素）", firstPaint.title === "渲染站 - Jisu" && firstPaint.name === "渲染站", JSON.stringify(firstPaint));
+  expect("慢网首帧：品牌区首帧即站长 Logo，无蓝 N 徽章", firstPaint.hasLogoImg && firstPaint.logoSrc.includes("/uploads/images/") && !firstPaint.hasBadge, JSON.stringify(firstPaint));
+  expect("慢网首帧：标签图标已指向站长 Logo", firstPaint.iconHref.includes("/uploads/images/"), firstPaint.iconHref);
+  const noteList = await admin.req("GET", "/api/notes");
+  const shareRes = await admin.req("GET", `/api/notes/${noteList.json.notes[0].id}/share`);
+  await page.goto(BASE + `/s/${shareRes.json.token}`, { waitUntil: "commit" });
+  await page.waitForSelector(".share-brand", { timeout: 5000 }).catch(() => {});
+  await page.waitForTimeout(400);
+  const shareBrand = await page.evaluate(() => ({
+    name: document.querySelector(".share-brand .brand-name")?.textContent || "",
+    hasImg: !!document.querySelector(".share-brand img.brand-logo"),
+    hasBadge: !!document.querySelector(".share-brand .brand-badge"),
+  }));
+  expect("分享页慢网首帧：品牌行即真站名+Logo（不闪默认名/蓝 N）", shareBrand.name === "渲染站" && shareBrand.hasImg && !shareBrand.hasBadge, JSON.stringify(shareBrand));
+  await page.unroute("**/api/site");
   await ctx.close();
 
   // ---------- 手机 390 管理员：常规页面 ----------
@@ -264,6 +336,32 @@ async function main() {
   await shot(page, "user-center", 390);
   await page.goto(BASE + "/#admin", { waitUntil: "networkidle" });
   await shot(page, "admin", 390);
+  // 用户中心选择栏：单行横滑不折行（5 个标签同一行、容器可横滚）
+  const tabStrip = await page.evaluate(() => {
+    const strip = document.querySelector(".me-tabs");
+    const btns = [...document.querySelectorAll(".me-tabs > button")];
+    const tops = btns.map((b) => Math.round(b.getBoundingClientRect().top));
+    return { n: btns.length, sameRow: btns.length > 0 && new Set(tops).size === 1, sw: strip?.scrollWidth || 0, cw: strip?.clientWidth || 0 };
+  });
+  expect("390 用户中心：选择栏单行横滑不折行", tabStrip.n === 5 && tabStrip.sameRow && tabStrip.sw > tabStrip.cw, JSON.stringify(tabStrip));
+  // 管理后台子标签：同样单行横滑
+  const segRow = await page.evaluate(() => {
+    const seg = document.querySelector(".me-main .seg");
+    const btns = seg ? [...seg.querySelectorAll("button")] : [];
+    const tops = btns.map((b) => Math.round(b.getBoundingClientRect().top));
+    return { n: btns.length, sameRow: btns.length > 0 && new Set(tops).size === 1, sw: seg?.scrollWidth || 0, cw: seg?.clientWidth || 0 };
+  });
+  expect("390 管理后台：子标签单行横滑不折行", segRow.n === 6 && segRow.sameRow && segRow.sw > segRow.cw, JSON.stringify(segRow));
+  // 后台按钮行：移动端保存/测试等高且等分整行
+  await page.locator(".me-main .seg button", { hasText: "第三方登录" }).click();
+  await page.waitForTimeout(600);
+  const mBtnRow = await page.evaluate(() => {
+    const row = document.querySelector(".me-main .btn-row");
+    if (!row) return null;
+    return [...row.querySelectorAll(".btn")].map((b) => { const r = b.getBoundingClientRect(); return { w: Math.round(r.width), h: Math.round(r.height) }; });
+  });
+  expect("390 后台：保存/测试按钮等高且等分整行", !!mBtnRow && mBtnRow.length === 2 && mBtnRow[0].h === mBtnRow[1].h && Math.abs(mBtnRow[0].w - mBtnRow[1].w) <= 2, JSON.stringify(mBtnRow));
+  await shot(page, "admin-oauth", 390);
   // 编辑器色板在 390 下不溢出
   await page.goto(BASE + "/#edit", { waitUntil: "networkidle" });
   const mPub = page.locator(".editor-head .btn-primary");
@@ -291,8 +389,28 @@ async function main() {
   // 用 DOM 点击打开抽屉：Playwright 点击会先把顶栏按钮滚入视口、改变背景滚动位置，测不到真实锁定
   await page.evaluate(() => { document.querySelector('button[aria-label="打开菜单"]')?.click(); });
   await page.waitForTimeout(600);
-  const navItems = (await page.locator(".drawer .drawer-nav .drawer-nav-item").allTextContents()).map((t) => t.trim());
-  expect("390 抽屉：登录区只剩「用户中心 / 退出登录」", JSON.stringify(navItems) === JSON.stringify(["用户中心", "退出登录"]), navItems.join("/"));
+  const userRow = await page.evaluate(() => {
+    const row = document.querySelector(".drawer-user-row");
+    const drawer = document.querySelector(".drawer");
+    if (!row || !drawer) return null;
+    const link = row.querySelector(".drawer-user-link");
+    const out = row.querySelector(".drawer-logout");
+    const lr = link?.getBoundingClientRect();
+    const orr = out?.getBoundingClientRect();
+    const dr = drawer.getBoundingClientRect();
+    return {
+      href: link?.getAttribute("href") || "",
+      linkText: (link?.textContent || "").replace(/\s+/g, ""),
+      outText: (out?.textContent || "").trim(),
+      sameLine: !!lr && !!orr && Math.abs((lr.top + lr.height / 2) - (orr.top + orr.height / 2)) < 4,
+      outAtRightEdge: !!orr && Math.abs(orr.right - dr.right) <= 24,
+      noOldNav: !document.querySelector(".drawer .drawer-nav"),
+      noUserCenterRow: ![...row.querySelectorAll("*")].some((e) => e.children.length === 0 && e.textContent.trim() === "用户中心"),
+    };
+  });
+  expect("390 抽屉：用户区改一行（头像行进用户中心，退出登录在右缘）",
+    !!userRow && userRow.href === "#me" && userRow.linkText.includes("render") && userRow.outText === "退出登录" && userRow.sameLine && userRow.outAtRightEdge && userRow.noOldNav && userRow.noUserCenterRow,
+    JSON.stringify(userRow));
   const boxOf = () => page.evaluate(() => {
     const d = document.querySelector(".drawer");
     if (!d) return null;
@@ -328,6 +446,18 @@ async function main() {
   await page.waitForTimeout(500);
   const postY = await page.evaluate(() => window.scrollY);
   expect("390 抽屉：关闭后背景滚动位置精确恢复", postY === preY, `${preY} -> ${postY}`);
+  // 点头像行进用户中心，并自动关抽屉
+  await page.evaluate(() => { document.querySelector('button[aria-label="打开菜单"]')?.click(); });
+  await page.waitForTimeout(600);
+  await shot(page, "drawer-user-row", 390);
+  await page.locator(".drawer-user-link").click();
+  await page.waitForTimeout(800);
+  const afterMe = await page.evaluate(() => ({
+    hash: location.hash,
+    drawerOpen: document.querySelector(".drawer-root")?.classList.contains("open"),
+    hasMeNav: !!document.querySelector(".me-tabs"),
+  }));
+  expect("390 抽屉：点头像行进用户中心并关抽屉", afterMe.hash === "#me" && !afterMe.drawerOpen && afterMe.hasMeNav, JSON.stringify(afterMe));
   await ctx.close();
 
   // ---------- 手机 390 游客：登录入口走抽屉 ----------

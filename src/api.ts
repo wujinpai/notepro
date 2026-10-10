@@ -18,6 +18,31 @@ export interface SiteInfo {
   icp: string; logo: string; registerOpen: boolean; oauthProviders: string[];
 }
 
+// 首屏站点信息水合：优先服务端注入 index.html 的 window.__NP_SITE__，其次上次访问的本地缓存，
+// 都没有才返回 null（调用方先渲染中性占位，等 /api/site 回来再填真品牌，杜绝「己素/蓝 N」闪烁）
+export function bootSite(): SiteInfo | null {
+  const w = (window as unknown as { __NP_SITE__?: SiteInfo }).__NP_SITE__;
+  if (w && typeof w.name === "string") return w;
+  try {
+    const c = localStorage.getItem("np-site");
+    if (c) {
+      const s = JSON.parse(c) as SiteInfo;
+      if (s && typeof s.name === "string") return s;
+    }
+  } catch { /* 缓存损坏则忽略 */ }
+  return null;
+}
+export function cacheSite(s: SiteInfo): void {
+  try { localStorage.setItem("np-site", JSON.stringify(s)); } catch { /* 存储不可用则忽略 */ }
+}
+export const DEFAULT_ICON = "/favicon-32.png?v=2";
+export function syncFavicon(href: string): void {
+  for (const rel of ["icon", "apple-touch-icon"]) {
+    const link = document.querySelector(`link[rel="${rel}"]`);
+    if (link && link.getAttribute("href") !== href) link.setAttribute("href", href);
+  }
+}
+
 async function req<T>(method: string, url: string, body?: unknown): Promise<T> {
   const r = await fetch(url, {
     method,

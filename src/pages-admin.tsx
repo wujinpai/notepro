@@ -21,7 +21,7 @@ export function AdminPage({ user, embedded = false }: { user: UserInfo; embedded
   if (embedded) {
     return (
       <div className="stack">
-        <div className="seg seg-wrap">
+        <div className="seg seg-scroll">
           {tabs.map(([k, label]) => <button key={k} className={tab === k ? "on" : ""} onClick={() => setTab(k)}>{label}</button>)}
         </div>
         {content}
@@ -36,7 +36,9 @@ export function AdminPage({ user, embedded = false }: { user: UserInfo; embedded
           <strong>管理后台</strong>
           <span className="muted tiny">{user.nickname}（管理员）</span>
         </div>
-        {tabs.map(([k, label]) => <button key={k} className={tab === k ? "on" : ""} onClick={() => setTab(k)}>{label}</button>)}
+        <div className="me-tabs">
+          {tabs.map(([k, label]) => <button key={k} className={tab === k ? "on" : ""} onClick={() => setTab(k)}>{label}</button>)}
+        </div>
       </aside>
       <section className="me-main">
         {content}
@@ -181,7 +183,9 @@ function SiteSettings() {
         </label>
       </div>
       {msg && <p className="ok-text">{msg}</p>}
-      <button className="btn btn-primary" onClick={() => void save()}>保存设置</button>
+      <div className="btn-row">
+        <button className="btn btn-primary" onClick={() => void save()}>保存设置</button>
+      </div>
     </div>
   );
 }
@@ -223,7 +227,9 @@ function SmtpSettings() {
         </label>
       </div>
       {msg && <p className="ok-text">{msg}</p>}
-      <button className="btn btn-primary" onClick={() => void save()}>保存邮箱设置</button>
+      <div className="btn-row">
+        <button className="btn btn-primary" onClick={() => void save()}>保存邮箱设置</button>
+      </div>
     </div>
   );
 }
@@ -265,7 +271,7 @@ function OauthSettings() {
               <label>{m.idLabel}<input value={cfg.clientId} onChange={(e) => setProviders({ ...providers, [p]: { ...cfg, clientId: e.target.value } })} /></label>
               <label>{m.secretLabel}<input type="password" value={secrets[p] || ""} placeholder={cfg.hasSecret ? "已设置（留空不改）" : "未设置"} onChange={(e) => setSecrets({ ...secrets, [p]: e.target.value })} /></label>
             </div>
-            <div className="row-gap">
+            <div className="btn-row">
               <button className="btn btn-primary" onClick={() => void save(p)}>保存{m.label}设置</button>
               <button className="btn btn-ghost" onClick={() => void test(p)}>测试配置</button>
             </div>
