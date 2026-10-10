@@ -5,7 +5,6 @@ import { HomePage, NoteDetail } from "./pages-home";
 import { SharePage } from "./pages-share";
 import { EditorPage } from "./pages-editor";
 import { MePage } from "./pages-me";
-import { AdminPage } from "./pages-admin";
 
 function useTheme() {
   const [theme, setTheme] = useState<"light" | "dark">(() => {
@@ -190,8 +189,7 @@ export default function App() {
                 {menuOpen && (
                   <div className="user-menu">
                     <button onClick={() => { setMenuOpen(false); go("#me"); }}>用户中心</button>
-                    <button onClick={() => { setMenuOpen(false); go("#me/notes"); }}>我的笔记</button>
-                    {user.role === "admin" && <button onClick={() => { setMenuOpen(false); go("#admin"); }}>管理后台</button>}
+                    <button onClick={() => { setMenuOpen(false); go("#me/notes"); }}>我的独白</button>
                     <button onClick={() => { setMenuOpen(false); void logout(); }}>退出登录</button>
                   </div>
                 )}
@@ -216,8 +214,9 @@ export default function App() {
       </header>
 
       <main className="container">
+        {/* 管理后台已并入用户中心，#admin 深链直接落到用户中心的「管理后台」标签，不留死链 */}
         {isAdmin ? (
-          user?.role === "admin" ? <AdminPage user={user} /> : <div className="empty">需要管理员权限。</div>
+          user ? <MePage user={user} site={site} refreshUser={refreshUser} onEditNote={openEdit} onOpenNote={openNote} /> : <div className="empty">请先登录。<button className="text-btn" onClick={() => setAuthOpen(true)}>去登录</button></div>
         ) : isMe ? (
           user ? <MePage user={user} site={site} refreshUser={refreshUser} onEditNote={openEdit} onOpenNote={openNote} /> : <div className="empty">请先登录。<button className="text-btn" onClick={() => setAuthOpen(true)}>去登录</button></div>
         ) : isEdit ? (

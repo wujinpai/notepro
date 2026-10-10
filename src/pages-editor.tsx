@@ -3,6 +3,8 @@ import { api, type NoteInfo } from "./api";
 import { TagInput } from "./components";
 import { countImages, renderMarkdown } from "./md";
 
+const COLOR_PRESETS = ["#e03131", "#e8590c", "#f08c00", "#2f9e44", "#1098ad", "#1971c2", "#7048e8", "#d6336c"];
+
 export function EditorPage({ note, onSaved, onCancel }: {
   note: NoteInfo | null; onSaved: (n: NoteInfo) => void; onCancel: () => void;
 }) {
@@ -100,6 +102,75 @@ export function EditorPage({ note, onSaved, onCancel }: {
     });
   };
 
+  // ---- 字体颜色：渲染端只认 [color=#RRGGBB]文本[/color]（6 位 hex 校验），见 md.ts ----
+  const [colorOpen, setColorOpen] = useState(false);
+  const [colorPos, setColorPos] = useState({ top: 0, left: 0 });
+  const colorWrapRef = useRef<HTMLSpanElement>(null);
+
+  const applyColor = (hex: string | null) => {
+    const ta = taRef.current;
+    setColorOpen(false);
+    if (!ta) return;
+    const s = ta.selectionStart;
+    const e = ta.selectionEnd;
+    if (hex === null) {
+      // 恢复默认：剥掉正包着光标/选区的颜色标记，或剥掉选区内部的全部颜色标记
+      const openM = content.slice(0, s).match(/\[color=#[0-9a-fA-F]{6}\]$/);
+      if (openM && content.slice(e).startsWith("[/color]")) {
+        const innerStart = s - openM[0].length;
+        setContent(content.slice(0, innerStart) + content.slice(s, e) + content.slice(e + "[/color]".length));
+        requestAnimationFrame(() => { ta.focus(); ta.setSelectionRange(innerStart, innerStart + (e - s)); });
+        return;
+      }
+      const sel = content.slice(s, e);
+      const stripped = sel.replace(/\[color=#[0-9a-fA-F]{6}\]/gi, "").replace(/\[\/color\]/gi, "");
+      if (stripped !== sel) {
+        setContent(content.slice(0, s) + stripped + content.slice(e));
+        requestAnimationFrame(() => { ta.focus(); ta.setSelectionRange(s, s + stripped.length); });
+      }
+      return;
+    }
+    const open = `[color=${hex}]`;
+    if (s === e) {
+      // 无选区：插入空包裹，光标停在中间待输入
+      setContent(content.slice(0, s) + open + "[/color]" + content.slice(e));
+      requestAnimationFrame(() => { ta.focus(); const p = s + open.length; ta.setSelectionRange(p, p); });
+    } else {
+      wrapSel(open, "[/color]", "彩色文字");
+    }
+  };
+
+  const toggleColorPop = () => {
+    if (colorOpen) { setColorOpen(false); return; }
+    const btn = colorWrapRef.current?.querySelector("button");
+    const r = btn?.getBoundingClientRect();
+    if (r) {
+      // 色板定宽 248px，左边缘钳在视口内，390px 下不溢出
+      setColorPos({ top: r.bottom + 6, left: Math.max(8, Math.min(r.left, window.innerWidth - 248 - 8)) });
+    }
+    setColorOpen(true);
+  };
+
+  useEffect(() => {
+    if (!colorOpen) return;
+    const onDown = (e: PointerEvent) => {
+      const t = e.target as HTMLElement;
+      if (!t.closest(".color-pop") && !t.closest(".md-tool-wrap")) setColorOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setColorOpen(false); };
+    const onMove = () => setColorOpen(false);
+    document.addEventListener("pointerdown", onDown);
+    document.addEventListener("keydown", onKey);
+    window.addEventListener("scroll", onMove, true);
+    window.addEventListener("resize", onMove);
+    return () => {
+      document.removeEventListener("pointerdown", onDown);
+      document.removeEventListener("keydown", onKey);
+      window.removeEventListener("scroll", onMove, true);
+      window.removeEventListener("resize", onMove);
+    };
+  }, [colorOpen]);
+
   const save = async () => {
     setBusy(true); setError("");
     try {
@@ -117,7 +188,7 @@ export function EditorPage({ note, onSaved, onCancel }: {
         <h2>{note ? "编辑独白" : "发表独白"}</h2>
         <div className="row-gap">
           <button className="btn btn-ghost" onClick={onCancel}>取消</button>
-          <button className="btn btn-primary" disabled={busy} onClick={() => void save()}>{busy ? "保存中…" : "保存"}</button>
+          <button className="btn btn-primary" disabled={busy} onClick={() => void save()}>{busy ? "发布中…" : "发布"}</button>
         </div>
       </div>
       <input className="title-input" value={title} placeholder="标题（可空）" onChange={(e) => setTitle(e.target.value)} />
@@ -135,6 +206,12 @@ export function EditorPage({ note, onSaved, onCancel }: {
               <div className="md-toolbar" role="toolbar" aria-label="Markdown 格式">
                 <button type="button" className="md-tool md-tool-bold" title="加粗" onClick={() => wrapSel("**", "**", "加粗文字")}>B</button>
                 <button type="button" className="md-tool md-tool-italic" title="斜体" onClick={() => wrapSel("*", "*", "斜体文字")}>I</button>
+                <span className="md-tool-wrap" ref={colorWrapRef}>
+                  <button type="button" className="md-tool md-tool-color" title="字体颜色" aria-haspopup="true" aria-expanded={colorOpen} onClick={toggleColorPop}>
+                    <span className="md-tool-color-a">A</span>
+                    <span className="md-tool-color-bar" />
+                  </button>
+                </span>
                 <button type="button" className="md-tool" title="标题" onClick={() => linePrefix("## ")}>H</button>
                 <button type="button" className="md-tool" title="链接" onClick={insertLink}>链接</button>
                 <button type="button" className="md-tool" title="插入图片（上传）" disabled={uploading}
@@ -148,6 +225,14 @@ export function EditorPage({ note, onSaved, onCancel }: {
                 <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/gif,image/webp" hidden
                   onChange={(e) => { const f = e.target.files?.[0]; if (f) void insertImage(f); e.target.value = ""; }} />
               </div>
+              {colorOpen && (
+                <div className="color-pop" style={{ top: colorPos.top, left: colorPos.left }} role="menu" aria-label="字体颜色">
+                  {COLOR_PRESETS.map((c) => (
+                    <button key={c} type="button" className="color-dot" style={{ background: c }} title={c} aria-label={`字体颜色 ${c}`} onClick={() => applyColor(c)} />
+                  ))}
+                  <button type="button" className="color-reset" onClick={() => applyColor(null)}>恢复默认</button>
+                </div>
+              )}
               <textarea ref={taRef} value={content} placeholder={"在这里写正文，支持 Markdown…\n\n# 标题\n**加粗**、列表、代码块都可以"} onChange={(e) => setContent(e.target.value)} />
             </>
           ) : (

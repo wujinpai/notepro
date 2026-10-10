@@ -1,4 +1,6 @@
-// NotePro 渲染检查：桌面 1366 + 手机 390 量横向溢出，截核心页面
+// NotePro 渲染检查：桌面 1366 + 手机 390 横向溢出量测 + 关键交互断言
+// 覆盖：颜色标记渲染/注入失效、编辑器「发布」+颜色工具+预览同步、抽屉恒高与背景锁定、
+// 抽屉登录区精简、管理后台并入用户中心（#admin 深链、普通用户不可见）、我的独白更名与无标题不造假标题
 import { spawn } from "node:child_process";
 import { chromium } from "playwright-core";
 import { rmSync, mkdirSync } from "node:fs";
@@ -23,9 +25,8 @@ server.stderr.on("data", (d) => { log += d.toString(); });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const lastCode = () => { const m = [...log.matchAll(/验证码：(\d{6})/g)]; return m.length ? m[m.length - 1][1] : ""; };
 
-async function main() {
-  for (let i = 0; i < 50; i++) { try { const r = await fetch(`${BASE}/api/health`); if (r.ok) break; } catch {} await sleep(200); }
-  // 用 API 建管理员 + 造一篇带长标题的帖（考验窄屏排版）
+// 每个用户一个 cookie 罐的 API 客户端
+function makeClient() {
   const jar = new Map();
   const req = async (method, path, body) => {
     const headers = {};
@@ -42,19 +43,50 @@ async function main() {
     const v = await req("POST", "/api/auth/slider/verify", { challengeId: ch.id, x: Number(m[1]) });
     return v.json.ticket;
   };
-  await req("POST", "/api/auth/send-code", { email: "render@example.com", purpose: "register", ticket: await solve() });
-  await sleep(150);
-  await req("POST", "/api/auth/register", { username: "render", email: "render@example.com", code: lastCode(), password: "render123", ticket: await solve() });
-  await req("POST", "/api/notes", {
+  const register = async (username, email, password) => {
+    await req("POST", "/api/auth/send-code", { email, purpose: "register", ticket: await solve() });
+    await sleep(150);
+    return req("POST", "/api/auth/register", { username, email, code: lastCode(), password, ticket: await solve() });
+  };
+  return { jar, req, register };
+}
+
+async function main() {
+  for (let i = 0; i < 50; i++) { try { const r = await fetch(`${BASE}/api/health`); if (r.ok) break; } catch {} await sleep(200); }
+
+  const admin = makeClient();
+  await admin.register("render", "render@example.com", "render123");
+  // 长标题帖（原有窄屏考验）
+  await admin.req("POST", "/api/notes", {
     title: "一篇标题特别长的测试笔记用来检验窄屏幕上会不会把页面撑出横向滚动条来",
     content: "# 你好\n\n这是一段正文，包含一个很长的不可断行字符串 https://example.com/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 以及正常中文段落。\n\n- 列表项一\n- 列表项二",
     tags: ["渲染检查", "长标签测试 abcdefghij"], visibility: "public",
   });
-  const token = jar.get("np_session");
+  // 颜色语法 + 注入用例帖
+  await admin.req("POST", "/api/notes", {
+    title: "颜色渲染检查",
+    content: "我是[color=#e03131]中国人[/color]，这句只有后半句是红的。\n\n注入用例一 [color=#123456\" onerror=\"alert(1)]不应该生效[/color]\n\n注入用例二 [color=red]不是十六进制[/color] 与 [color=#12345]位数不对[/color] 与 <img src=\"x\" onerror=\"alert(2)\">\n\n正常嵌套 [color=#1971c2]带 `代码` 的蓝字[/color] 完。",
+    tags: ["渲染检查"], visibility: "public",
+  });
+  // 无标题（单行正文）与有真标题各一篇：验证「我的独白」列表不造假标题
+  await admin.req("POST", "/api/notes", { content: "无标题独白正文只有一行", visibility: "public" });
+  await admin.req("POST", "/api/notes", { title: "有标题的独白", content: "这篇有真标题，正文是这一行。", visibility: "public" });
+  // 垫高信息流，保证窄屏下页面可滚动（抽屉锁滚动断言的前置条件）
+  for (let i = 1; i <= 8; i++) {
+    await admin.req("POST", "/api/notes", { content: `占位独白 ${i}，用来把首页信息流撑到可滚动。`, tags: ["渲染检查"], visibility: "public" });
+  }
+  const bob = makeClient();
+  await bob.register("bob", "bob@example.com", "bob12345");
+  const adminToken = admin.jar.get("np_session");
+  const bobToken = bob.jar.get("np_session");
 
   const exe = globSync(process.env.HOME + "/.cache/ms-playwright/chromium_headless_shell-*/chrome-linux/headless_shell")[0];
   const browser = await chromium.launch({ executablePath: exe });
-  let fails = 0;
+  let fails = 0, assertFails = 0;
+  const expect = (name, cond, extra = "") => {
+    console.log(`${cond ? "✓" : "✗"} ${name}${cond ? "" : ` ${extra}`}`);
+    if (!cond) assertFails++;
+  };
   async function shot(page, name, width) {
     await page.waitForTimeout(600);
     const metrics = await page.evaluate(() => ({
@@ -68,48 +100,250 @@ async function main() {
     await page.screenshot({ path: `${OUT}/${name}-${width}.png`, fullPage: true });
   }
 
-  // 桌面 1366
+  // ---------- 桌面 1366 游客：首页 + 颜色详情渲染 ----------
   let ctx = await browser.newContext({ viewport: { width: 1366, height: 900 } });
   let page = await ctx.newPage();
   await page.goto(BASE + "/", { waitUntil: "networkidle" });
   await shot(page, "home", 1366);
+  const cardClean = await page.evaluate(() => {
+    const card = [...document.querySelectorAll(".note-card")].find((c) => c.textContent.includes("颜色渲染检查"));
+    return card ? { found: true, noMarker: !card.textContent.includes("[color=#e03131]"), hasText: card.textContent.includes("我是中国人") } : { found: false };
+  });
+  expect("游客首页：颜色帖卡片摘要不带标记原文", cardClean.found && cardClean.noMarker && cardClean.hasText, JSON.stringify(cardClean));
+  await page.locator(".note-card", { hasText: "颜色渲染检查" }).first().click();
+  await page.waitForTimeout(700);
+  const detail = await page.evaluate(() => {
+    const root = document.querySelector(".note-detail");
+    if (!root) return { found: false };
+    const red = root.querySelector('span[style*="color:#e03131"]');
+    const blue = root.querySelector('span[style*="color:#1971c2"]');
+    const eventAttrs = [...root.querySelectorAll("*")].filter((el) => [...el.attributes].some((a) => a.name.toLowerCase().startsWith("on"))).length;
+    const badStyle = [...root.querySelectorAll("span")].some((s) => (s.getAttribute("style") || "").includes("onerror"));
+    return {
+      found: true,
+      redText: red ? red.textContent : "",
+      redStyle: red ? red.getAttribute("style") : "",
+      blueText: blue ? blue.textContent : "",
+      codeInBlue: blue ? !!blue.querySelector("code") : false,
+      eventAttrs, badStyle,
+      brokenImg: root.querySelectorAll('img[src="x"]').length,
+      redLiteral: root.textContent.includes("[color=red]"),
+      shortLiteral: root.textContent.includes("[color=#12345]"),
+    };
+  });
+  expect("游客详情：[color] 渲染成红色 span 且文本正确", detail.found && detail.redText === "中国人" && /#e03131/.test(detail.redStyle || ""), JSON.stringify(detail));
+  expect("游客详情：颜色内行内代码正常还原", detail.codeInBlue && (detail.blueText || "").includes("代码"), JSON.stringify(detail));
+  expect("游客详情：注入用例全失效（无事件属性/伪造 style/坏图）", detail.eventAttrs === 0 && !detail.badStyle && detail.brokenImg === 0, JSON.stringify(detail));
+  expect("游客详情：非法颜色标记按原文显示", detail.redLiteral && detail.shortLiteral, JSON.stringify(detail));
+  await page.goto(BASE + "/", { waitUntil: "networkidle" });
   await page.getByRole("button", { name: "登录", exact: true }).click();
   await shot(page, "login-dialog", 1366);
   await ctx.close();
 
-  // 桌面 1366（登录态，用户中心/后台）
+  // ---------- 桌面 1366 管理员：菜单 / 用户中心后台标签 / 我的独白 / 编辑器 ----------
   ctx = await browser.newContext({ viewport: { width: 1366, height: 900 } });
-  await ctx.addCookies([{ name: "np_session", value: token, domain: "127.0.0.1", path: "/" }]);
+  await ctx.addCookies([{ name: "np_session", value: adminToken, domain: "127.0.0.1", path: "/" }]);
   page = await ctx.newPage();
-  await page.goto(BASE + "/#/me", { waitUntil: "networkidle" });
+  await page.goto(BASE + "/", { waitUntil: "networkidle" });
+  await page.locator(".user-chip").click();
+  await page.waitForTimeout(300);
+  const menuTexts = (await page.locator(".user-menu button").allTextContents()).map((t) => t.trim());
+  expect("桌面管理员：头像菜单已无「管理后台」", !menuTexts.some((t) => t.includes("管理后台")), menuTexts.join("/"));
+  expect("桌面管理员：头像菜单为 用户中心/我的独白/退出登录 且无「我的笔记」残留",
+    ["用户中心", "我的独白", "退出登录"].every((x) => menuTexts.some((t) => t === x)) && !menuTexts.some((t) => t.includes("我的笔记")), menuTexts.join("/"));
+  await page.keyboard.press("Escape");
+
+  await page.goto(BASE + "/#me", { waitUntil: "networkidle" });
   await shot(page, "user-center", 1366);
-  await page.goto(BASE + "/#/admin", { waitUntil: "networkidle" });
+  const navTexts = (await page.locator(".me-nav > button").allTextContents()).map((t) => t.trim());
+  expect("桌面管理员：用户中心标签序 个人资料/账号安全/我的独白/第三方账号/管理后台",
+    JSON.stringify(navTexts) === JSON.stringify(["个人资料", "账号安全", "我的独白", "第三方账号", "管理后台"]), navTexts.join("/"));
+  await page.locator(".me-nav > button", { hasText: "管理后台" }).click();
+  await page.locator(".me-main .stat-card").first().waitFor({ timeout: 5000 }).catch(() => {});
+  const segTexts = (await page.locator(".me-main .seg button").allTextContents()).map((t) => t.trim());
+  expect("桌面管理员：后台六个子标签齐全", ["概览", "用户管理", "内容管理", "站点设置", "邮箱设置", "第三方登录"].every((x) => segTexts.some((t) => t === x)), segTexts.join("/"));
+  const statCount = await page.locator(".me-main .stat-card").count();
+  expect("桌面管理员：后台概览统计卡 6 张（功能完整）", statCount === 6, `got ${statCount}`);
+
+  await page.locator(".me-nav > button", { hasText: "我的独白" }).click();
+  await page.waitForTimeout(600);
+  const listCheck = await page.evaluate(() => {
+    const items = [...document.querySelectorAll(".my-note-item")];
+    const untitled = items.find((it) => it.textContent.includes("无标题独白正文只有一行"));
+    const titled = items.find((it) => it.textContent.includes("有标题的独白"));
+    const colorItem = items.find((it) => it.textContent.includes("颜色渲染检查"));
+    const count = (s, sub) => s.split(sub).length - 1;
+    return {
+      oldNameGone: !document.body.innerText.includes("我的笔记"),
+      panelHeading: document.querySelector(".me-main .panel h3")?.textContent || "",
+      untitledFound: !!untitled,
+      untitledHasFakeTitle: untitled ? !!untitled.querySelector(".my-note-title") : null,
+      untitledOccurrences: untitled ? count(untitled.textContent, "无标题独白正文只有一行") : -1,
+      titledTitleText: titled ? (titled.querySelector(".my-note-title")?.textContent || "") : "",
+      titledHasBody: titled ? titled.textContent.includes("这篇有真标题，正文是这一行。") : false,
+      colorRedSpan: colorItem ? !!colorItem.querySelector('span[style*="color:#e03131"]') : null,
+    };
+  });
+  expect("我的独白：面板标题已更名", listCheck.panelHeading === "我的独白", listCheck.panelHeading);
+  expect("更名零残留：用户中心页无「我的笔记」文案", listCheck.oldNameGone);
+  expect("我的独白：无标题笔记不造标题行", listCheck.untitledFound && listCheck.untitledHasFakeTitle === false, JSON.stringify(listCheck));
+  expect("我的独白：无标题正文只出现一次（不重复）", listCheck.untitledOccurrences === 1, `occ=${listCheck.untitledOccurrences}`);
+  expect("我的独白：有标题笔记标题行+预览正常", listCheck.titledTitleText.trim() === "有标题的独白" && listCheck.titledHasBody, JSON.stringify(listCheck));
+  expect("我的独白：预览渲染红色 span（同一渲染器）", listCheck.colorRedSpan === true, JSON.stringify(listCheck));
+
+  await page.goto(BASE + "/#admin", { waitUntil: "networkidle" });
+  await page.locator(".me-main .stat-card").first().waitFor({ timeout: 5000 }).catch(() => {});
   await shot(page, "admin", 1366);
+  const adminDeep = await page.evaluate(() => {
+    const nav = [...document.querySelectorAll(".me-nav > button")].find((b) => b.textContent.includes("管理后台"));
+    return { tabOn: !!nav && nav.classList.contains("on"), hasStats: !!document.querySelector(".me-main .stat-card") };
+  });
+  expect("桌面管理员：#admin 深链直达用户中心「管理后台」标签（不死链）", adminDeep.tabOn && adminDeep.hasStats, JSON.stringify(adminDeep));
+
+  // 编辑器：发布按钮 + 字体颜色全流程 + 预览同步
+  await page.goto(BASE + "/#edit", { waitUntil: "networkidle" });
+  const pubBtn = page.locator(".editor-head .btn-primary");
+  expect("编辑器：主按钮文案为「发布」", ((await pubBtn.textContent()) || "").trim() === "发布", (await pubBtn.textContent()) || "");
+  const ta = page.locator(".editor-pane textarea");
+  await ta.fill("我是中国人，要突出重点。");
+  await ta.evaluate((el) => { el.focus(); el.setSelectionRange(2, 5); });
+  await page.locator(".md-tool-color").click();
+  await page.waitForTimeout(250);
+  const popBox = await page.locator(".color-pop").boundingBox();
+  expect("编辑器：色板展开且在桌面视口内", !!popBox && popBox.x >= 0 && popBox.x + popBox.width <= 1366 && popBox.y + popBox.height <= 900, JSON.stringify(popBox));
+  await page.locator(".color-dot").first().click();
+  const wrapped = await ta.inputValue();
+  expect("编辑器：选中文字被 [color] 包裹", /我是\[color=#e03131\]中国人\[\/color\]/.test(wrapped), wrapped);
+  await page.getByRole("button", { name: "预览", exact: true }).click();
+  await page.waitForTimeout(250);
+  const prevSpan = await page.evaluate(() => {
+    const s = document.querySelector('.swap-preview span[style*="color:"]');
+    return s ? { text: s.textContent, style: s.getAttribute("style") } : null;
+  });
+  expect("编辑器：预览同步渲染红色 span", !!prevSpan && prevSpan.text === "中国人" && /#e03131/.test(prevSpan.style || ""), JSON.stringify(prevSpan));
+  await page.getByRole("button", { name: "编辑", exact: true }).click();
+  await page.waitForTimeout(200);
+  await ta.evaluate((el) => { el.focus(); el.setSelectionRange(0, el.value.length); });
+  await page.locator(".md-tool-color").click();
+  await page.waitForTimeout(200);
+  await page.locator(".color-reset").click();
+  const resetVal = await ta.inputValue();
+  expect("编辑器：「恢复默认」剥掉颜色标记", !resetVal.includes("[color=") && resetVal.includes("我是中国人"), resetVal);
+  await ta.evaluate((el) => { el.focus(); const p = el.value.length; el.setSelectionRange(p, p); });
+  await page.locator(".md-tool-color").click();
+  await page.waitForTimeout(200);
+  await page.locator(".color-dot").nth(5).click();
+  const emptyWrap = await ta.inputValue();
+  expect("编辑器：无选区插入空包裹", emptyWrap.includes("[color=#1971c2][/color]"), emptyWrap);
   await ctx.close();
 
-  // 手机 390（登录态，看用户中心与后台）
+  // ---------- 桌面 1366 普通用户：无后台标签，#admin 不死链 ----------
+  ctx = await browser.newContext({ viewport: { width: 1366, height: 900 } });
+  await ctx.addCookies([{ name: "np_session", value: bobToken, domain: "127.0.0.1", path: "/" }]);
+  page = await ctx.newPage();
+  await page.goto(BASE + "/#me", { waitUntil: "networkidle" });
+  const bobNav = (await page.locator(".me-nav > button").allTextContents()).map((t) => t.trim());
+  expect("桌面普通用户：用户中心无「管理后台」标签", !bobNav.some((t) => t.includes("管理后台")), bobNav.join("/"));
+  await page.goto(BASE + "/#admin", { waitUntil: "networkidle" });
+  await page.waitForTimeout(400);
+  const bobAdmin = await page.evaluate(() => ({
+    hasAdminTab: [...document.querySelectorAll(".me-nav > button")].some((b) => b.textContent.includes("管理后台")),
+    hasStat: !!document.querySelector(".me-main .stat-card"),
+    hasProfilePanel: !!document.querySelector(".me-main .panel"),
+  }));
+  expect("桌面普通用户：#admin 不死链且无后台内容", !bobAdmin.hasAdminTab && !bobAdmin.hasStat && bobAdmin.hasProfilePanel, JSON.stringify(bobAdmin));
+  await ctx.close();
+
+  // ---------- 手机 390 管理员：常规页面 ----------
   ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
-  await ctx.addCookies([{ name: "np_session", value: token, domain: "127.0.0.1", path: "/" }]);
+  await ctx.addCookies([{ name: "np_session", value: adminToken, domain: "127.0.0.1", path: "/" }]);
   page = await ctx.newPage();
   await page.goto(BASE + "/", { waitUntil: "networkidle" });
   await shot(page, "home", 390);
-  await page.goto(BASE + "/#/me", { waitUntil: "networkidle" });
+  await page.goto(BASE + "/#me", { waitUntil: "networkidle" });
   await shot(page, "user-center", 390);
-  await page.goto(BASE + "/#/admin", { waitUntil: "networkidle" });
+  await page.goto(BASE + "/#admin", { waitUntil: "networkidle" });
   await shot(page, "admin", 390);
+  // 编辑器色板在 390 下不溢出
+  await page.goto(BASE + "/#edit", { waitUntil: "networkidle" });
+  const mPub = page.locator(".editor-head .btn-primary");
+  expect("390 编辑器：主按钮文案为「发布」", ((await mPub.textContent()) || "").trim() === "发布", (await mPub.textContent()) || "");
+  await page.locator(".editor-pane textarea").fill("测试一下颜色色板在窄屏下会不会溢出，顺便写长一点触发工具栏横向滚动。");
+  await page.locator(".md-tool-color").click();
+  await page.waitForTimeout(250);
+  const mPop = await page.locator(".color-pop").boundingBox();
+  const mDots = await page.locator(".color-dot").count();
+  expect("390：色板 8 色齐全且不溢出视口", mDots === 8 && !!mPop && mPop.x >= 0 && mPop.x + mPop.width <= 390, `dots=${mDots} box=${JSON.stringify(mPop)}`);
+  await shot(page, "editor-color", 390);
+  await page.keyboard.press("Escape");
   await ctx.close();
 
-  // 手机 390 登录弹窗（游客）
+  // ---------- 手机 390x640 抽屉：恒高、内部滚动、背景锁定 ----------
+  ctx = await browser.newContext({ viewport: { width: 390, height: 640 }, isMobile: true, hasTouch: true });
+  await ctx.addCookies([{ name: "np_session", value: adminToken, domain: "127.0.0.1", path: "/" }]);
+  page = await ctx.newPage();
+  await page.goto(BASE + "/", { waitUntil: "networkidle" });
+  await page.evaluate(() => window.scrollTo(0, 600));
+  await page.waitForTimeout(250);
+  const preY = await page.evaluate(() => window.scrollY);
+  expect("390 抽屉：背景页面可滚动（前置条件）", preY > 0, `scrollY=${preY}`);
+  const cardTopBefore = await page.evaluate(() => document.querySelector(".note-card")?.getBoundingClientRect().top);
+  // 用 DOM 点击打开抽屉：Playwright 点击会先把顶栏按钮滚入视口、改变背景滚动位置，测不到真实锁定
+  await page.evaluate(() => { document.querySelector('button[aria-label="打开菜单"]')?.click(); });
+  await page.waitForTimeout(600);
+  const navItems = (await page.locator(".drawer .drawer-nav .drawer-nav-item").allTextContents()).map((t) => t.trim());
+  expect("390 抽屉：登录区只剩「用户中心 / 退出登录」", JSON.stringify(navItems) === JSON.stringify(["用户中心", "退出登录"]), navItems.join("/"));
+  const boxOf = () => page.evaluate(() => {
+    const d = document.querySelector(".drawer");
+    if (!d) return null;
+    const r = d.getBoundingClientRect();
+    return { x: r.x, y: r.y, width: r.width, height: r.height, sh: d.scrollHeight, ch: d.clientHeight };
+  });
+  const box1 = await boxOf();
+  expect("390 抽屉：面板高度恒为视口高 640", !!box1 && Math.abs(box1.height - 640) < 1.5, JSON.stringify(box1));
+  expect("390 抽屉：内容自身可滚动（前置条件）", !!box1 && box1.sh > box1.ch, JSON.stringify(box1));
+  const lockState = await page.evaluate(() => ({ pos: document.body.style.position, top: document.body.style.top }));
+  expect("390 抽屉：body 已 fixed 锁定并保留滚动偏移", lockState.pos === "fixed" && lockState.top === `-${preY}px`, JSON.stringify(lockState));
+  // 程序化滚动：到底 → 触摸上滑 overscroll → 回顶 → 触摸下滑 overscroll，并尝试滚背景
+  await page.evaluate(() => { const d = document.querySelector(".drawer"); if (d) d.scrollTop = d.scrollHeight; });
+  await page.waitForTimeout(150);
+  const cdp = await ctx.newCDPSession(page);
+  const swipe = async (x, y1, y2) => {
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y: y1, id: 1 }] });
+    for (let i = 1; i <= 6; i++) await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x, y: Math.round(y1 + (y2 - y1) * i / 6), id: 1 }] });
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  };
+  await swipe(150, 460, 160); await page.waitForTimeout(200);
+  await page.evaluate(() => { const d = document.querySelector(".drawer"); if (d) d.scrollTop = 0; });
+  await page.waitForTimeout(150);
+  await swipe(150, 160, 460); await page.waitForTimeout(200);
+  await page.evaluate(() => window.scrollTo(0, 99999));
+  await page.waitForTimeout(100);
+  const box2 = await boxOf();
+  const sameBox = !!box1 && !!box2 && Math.abs(box1.x - box2.x) < 1 && Math.abs(box1.y - box2.y) < 1 && Math.abs(box1.width - box2.width) < 1 && Math.abs(box1.height - box2.height) < 1;
+  expect("390 抽屉：滚动+overscroll+触摸滑动后面板外框纹丝不动", sameBox, `${JSON.stringify(box1)} -> ${JSON.stringify(box2)}`);
+  const cardTopDuring = await page.evaluate(() => document.querySelector(".note-card")?.getBoundingClientRect().top);
+  expect("390 抽屉：打开期间背景卡片位置不动", Math.abs((cardTopDuring ?? 0) - (cardTopBefore ?? 0)) < 1, `${cardTopBefore} -> ${cardTopDuring}`);
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(500);
+  const postY = await page.evaluate(() => window.scrollY);
+  expect("390 抽屉：关闭后背景滚动位置精确恢复", postY === preY, `${preY} -> ${postY}`);
+  await ctx.close();
+
+  // ---------- 手机 390 游客：登录入口走抽屉 ----------
   ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
   page = await ctx.newPage();
   await page.goto(BASE + "/", { waitUntil: "networkidle" });
-  await page.getByRole("button", { name: "登录", exact: true }).click();
+  await page.getByRole("button", { name: "打开菜单" }).click();
+  await page.waitForTimeout(600);
+  await page.getByRole("button", { name: "登录 / 注册" }).click();
   await shot(page, "login-dialog", 390);
   await ctx.close();
 
   await browser.close();
   server.kill("SIGTERM");
-  console.log(fails === 0 ? "渲染检查：全部通过，零横向溢出" : `渲染检查：${fails} 页存在溢出`);
-  process.exit(fails ? 1 : 0);
+  const total = fails + assertFails;
+  console.log(total === 0 ? "渲染检查：全部通过（溢出 0 + 全部断言通过）" : `渲染检查：${fails} 页溢出，${assertFails} 项断言失败`);
+  process.exit(total ? 1 : 0);
 }
 main().catch((e) => { console.error(e); server.kill("SIGTERM"); process.exit(1); });

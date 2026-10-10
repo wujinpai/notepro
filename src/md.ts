@@ -7,6 +7,10 @@ function inline(s: string): string {
   const stash: string[] = [];
   const keep = (html: string) => { stash.push(html); return `\u0001${stash.length - 1}\u0002`; };
   s = s.replace(/`([^`\n]+)`/g, (_m, c) => keep(`<code>${c}</code>`));
+  // 字体颜色标记 [color=#RRGGBB]文本[/color]：仅认「# + 恰好 6 位 hex」，其余写法一律按原文输出。
+  // 整体先占位保护再还原，内部只保留已转义的纯文本（不再套强调语法），hex 经校验后才拼进 style，杜绝属性注入。
+  s = s.replace(/\[color=#([0-9a-fA-F]{6})\]([^\n]*?)\[\/color\]/g, (_m, hex, inner) =>
+    keep(`<span style="color:#${hex.toLowerCase()}">${inner}</span>`));
   s = s.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (_m, alt, url) => {
     const u = safeUrl(url);
     return u ? keep(`<img src="${u}" alt="${alt}" loading="lazy"/>`) : keep(esc(alt));
@@ -18,7 +22,9 @@ function inline(s: string): string {
   s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
   s = s.replace(/(^|\W)\*([^*\n]+)\*/g, "$1<em>$2</em>");
   s = s.replace(/~~([^~]+)~~/g, "<del>$1</del>");
-  s = s.replace(/\u0001(\d+)\u0002/g, (_m, i) => stash[Number(i)] || "");
+  // 循环还原：颜色 span 内部可能含更早占位的行内代码等，单次扫描还原不干净
+  let prev = "";
+  while (prev !== s) { prev = s; s = s.replace(/\u0001(\d+)\u0002/g, (_m, i) => stash[Number(i)] || ""); }
   return s;
 }
 
@@ -91,6 +97,8 @@ export function renderMarkdown(src: string): string {
 export function excerpt(content: string, n = 220): string {
   const text = (content || "")
     .replace(/```[\s\S]*?```/g, " ")
+    .replace(/\[color=#[0-9a-fA-F]{6}\]/gi, "")
+    .replace(/\[\/color\]/gi, "")
     .replace(/!\[[^\]]*\]\([^)]*\)/g, " ")
     .replace(/[#>*`\-]/g, "")
     .replace(/\s+/g, " ")

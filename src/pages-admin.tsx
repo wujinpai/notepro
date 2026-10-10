@@ -4,9 +4,30 @@ import { Avatar } from "./components";
 
 type AdminTab = "overview" | "users" | "notes" | "site" | "smtp" | "oauth";
 
-export function AdminPage({ user }: { user: UserInfo }) {
+export function AdminPage({ user, embedded = false }: { user: UserInfo; embedded?: boolean }) {
   const [tab, setTab] = useState<AdminTab>("overview");
   const tabs: [AdminTab, string][] = [["overview", "概览"], ["users", "用户管理"], ["notes", "内容管理"], ["site", "站点设置"], ["smtp", "邮箱设置"], ["oauth", "第三方登录"]];
+  const content = (
+    <>
+      {tab === "overview" && <Overview />}
+      {tab === "users" && <Users />}
+      {tab === "notes" && <NotesAdmin />}
+      {tab === "site" && <SiteSettings />}
+      {tab === "smtp" && <SmtpSettings />}
+      {tab === "oauth" && <OauthSettings />}
+    </>
+  );
+  // 嵌入用户中心：不再套一层 me-layout，只留子标签行 + 内容（外层导航由用户中心承担）
+  if (embedded) {
+    return (
+      <div className="stack">
+        <div className="seg seg-wrap">
+          {tabs.map(([k, label]) => <button key={k} className={tab === k ? "on" : ""} onClick={() => setTab(k)}>{label}</button>)}
+        </div>
+        {content}
+      </div>
+    );
+  }
   return (
     <div className="me-layout">
       <aside className="me-nav">
@@ -18,12 +39,7 @@ export function AdminPage({ user }: { user: UserInfo }) {
         {tabs.map(([k, label]) => <button key={k} className={tab === k ? "on" : ""} onClick={() => setTab(k)}>{label}</button>)}
       </aside>
       <section className="me-main">
-        {tab === "overview" && <Overview />}
-        {tab === "users" && <Users />}
-        {tab === "notes" && <NotesAdmin />}
-        {tab === "site" && <SiteSettings />}
-        {tab === "smtp" && <SmtpSettings />}
-        {tab === "oauth" && <OauthSettings />}
+        {content}
       </section>
     </div>
   );

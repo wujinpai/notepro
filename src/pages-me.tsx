@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, fmtTime, type NoteInfo, type SiteInfo, type UserInfo } from "./api";
 import { Avatar, Lightbox, Modal, PlaneIcon, ShareDialog, SliderCaptcha, imageHit } from "./components";
-import { excerpt, renderMarkdown } from "./md";
+import { renderMarkdown } from "./md";
+import { AdminPage } from "./pages-admin";
 
 interface SessionRow { id: number; ua: string; ip: string; created_at: number; current: boolean }
 interface Binding { provider: string; provider_nickname: string; provider_avatar: string; created_at: number }
@@ -10,12 +11,26 @@ export function MePage({ user, site, refreshUser, onEditNote, onOpenNote }: {
   user: UserInfo; site: SiteInfo; refreshUser: () => void;
   onEditNote: (n: NoteInfo) => void; onOpenNote: (n: NoteInfo) => void;
 }) {
-  const [tab, setTab] = useState<"profile" | "security" | "notes" | "accounts">(() => {
+  const [tab, setTab] = useState<"profile" | "security" | "notes" | "accounts" | "admin">(() => {
+    if (location.hash.includes("admin") && user.role === "admin") return "admin";
     if (location.hash.includes("notes")) return "notes";
     if (location.hash.includes("accounts")) return "accounts";
     if (location.hash.includes("security")) return "security";
     return "profile";
   });
+  // 已在本页时通过菜单/地址栏切换 hash（#me ↔ #me/notes ↔ #admin）不重挂载，靠监听同步标签
+  useEffect(() => {
+    const sync = () => {
+      const h = location.hash;
+      if (h.includes("admin") && user.role === "admin") setTab("admin");
+      else if (h.includes("notes")) setTab("notes");
+      else if (h.includes("accounts")) setTab("accounts");
+      else if (h.includes("security")) setTab("security");
+      else if (h === "#me") setTab("profile");
+    };
+    window.addEventListener("hashchange", sync);
+    return () => window.removeEventListener("hashchange", sync);
+  }, [user.role]);
   return (
     <div className="me-layout">
       <aside className="me-nav">
@@ -26,14 +41,16 @@ export function MePage({ user, site, refreshUser, onEditNote, onOpenNote }: {
         </div>
         <button className={tab === "profile" ? "on" : ""} onClick={() => setTab("profile")}>个人资料</button>
         <button className={tab === "security" ? "on" : ""} onClick={() => setTab("security")}>账号安全</button>
-        <button className={tab === "notes" ? "on" : ""} onClick={() => setTab("notes")}>我的笔记</button>
+        <button className={tab === "notes" ? "on" : ""} onClick={() => setTab("notes")}>我的独白</button>
         <button className={tab === "accounts" ? "on" : ""} onClick={() => setTab("accounts")}>第三方账号</button>
+        {user.role === "admin" && <button className={tab === "admin" ? "on" : ""} onClick={() => setTab("admin")}>管理后台</button>}
       </aside>
       <section className="me-main">
         {tab === "profile" && <ProfileTab user={user} refreshUser={refreshUser} />}
         {tab === "security" && <SecurityTab user={user} refreshUser={refreshUser} />}
         {tab === "notes" && <MyNotesTab onEditNote={onEditNote} onOpenNote={onOpenNote} />}
         {tab === "accounts" && <AccountsTab site={site} />}
+        {tab === "admin" && user.role === "admin" && <AdminPage user={user} embedded />}
       </section>
     </div>
   );
@@ -241,21 +258,19 @@ function MyNotesTab({ onEditNote, onOpenNote }: { onEditNote: (n: NoteInfo) => v
   };
   return (
     <div className="panel">
-      <h3>我的笔记</h3>
+      <h3>我的独白</h3>
       <div className="seg">
         {[["all", "全部"], ["public", "公开"], ["private", "私密"], ["archived", "归档"]].map(([k, label]) => (
           <button key={k} className={filter === k ? "on" : ""} onClick={() => setFilter(k)}>{label}</button>
         ))}
       </div>
       {notes.length === 0 && <p className="muted tiny">暂无笔记</p>}
-      {notes.map((n) => {
-        const label = n.title || excerpt(n.content, 48);
-        return (
+      {notes.map((n) => (
         <div key={n.id} className="my-note-item">
           <div className="my-note-head">
-            {label && (
+            {n.title && (
               <button className="my-note-title" onClick={() => onOpenNote(n)}>
-                {label}
+                {n.title}
               </button>
             )}
             {n.pinned && <span className="badge badge-pin">置顶</span>}
@@ -275,8 +290,7 @@ function MyNotesTab({ onEditNote, onOpenNote }: { onEditNote: (n: NoteInfo) => v
             <button className="btn btn-danger btn-sm" onClick={() => void del(n)}>删除</button>
           </div>
         </div>
-        );
-      })}
+      ))}
       {lb && <Lightbox images={lb.images} index={lb.index} onClose={() => setLb(null)} />}
       {shareNote && <ShareDialog note={shareNote} onClose={() => setShareNote(null)} />}
     </div>

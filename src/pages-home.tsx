@@ -83,15 +83,39 @@ export function HomePage({ user, site, onOpenNote, onComment, q, onSearch, theme
 
   const [calOpen, setCalOpen] = useState(false);
 
-  // 移动端抽屉：打开时锁滚动，Esc 关闭
+  // 移动端抽屉：打开时可靠锁住背景滚动，Esc 关闭
   const touchX = useRef<number | null>(null);
+  const closeDrawerRef = useRef(onCloseDrawer);
+  useEffect(() => { closeDrawerRef.current = onCloseDrawer; });
   useEffect(() => {
     if (!drawerOpen) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onCloseDrawer(); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") closeDrawerRef.current(); };
     document.addEventListener("keydown", onKey);
-    document.body.style.overflow = "hidden";
-    return () => { document.removeEventListener("keydown", onKey); document.body.style.overflow = ""; };
-  }, [drawerOpen, onCloseDrawer]);
+    // iOS 上仅 body overflow:hidden 挡不住背景滚动、面板高度还会随动态工具栏变化被拉伸，
+    // 改用 position:fixed 锁定 body（记录并保持当前滚动位置），关闭时精确恢复。
+    const body = document.body;
+    const scrollY = window.scrollY;
+    const prev = {
+      position: body.style.position, top: body.style.top, left: body.style.left,
+      right: body.style.right, width: body.style.width, overflow: body.style.overflow,
+    };
+    body.style.position = "fixed";
+    body.style.top = `-${scrollY}px`;
+    body.style.left = "0";
+    body.style.right = "0";
+    body.style.width = "100%";
+    body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      body.style.position = prev.position;
+      body.style.top = prev.top;
+      body.style.left = prev.left;
+      body.style.right = prev.right;
+      body.style.width = prev.width;
+      body.style.overflow = prev.overflow;
+      window.scrollTo(0, scrollY);
+    };
+  }, [drawerOpen]);
 
   return (
     <>
@@ -220,8 +244,6 @@ export function HomePage({ user, site, onOpenNote, onComment, q, onSearch, theme
               </div>
               <nav className="drawer-nav">
                 <a className="drawer-nav-item" href="#me" onClick={onCloseDrawer}>用户中心</a>
-                <a className="drawer-nav-item" href="#me/notes" onClick={onCloseDrawer}>我的笔记</a>
-                {user.role === "admin" && <a className="drawer-nav-item" href="#admin" onClick={onCloseDrawer}>管理后台</a>}
                 <button type="button" className="drawer-nav-item danger" onClick={() => { onCloseDrawer(); onLogout(); }}>退出登录</button>
               </nav>
             </div>

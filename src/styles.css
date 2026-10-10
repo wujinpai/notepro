@@ -175,7 +175,7 @@ a.side-user:hover { border-color: var(--blue); }
 .drawer-foot .btn-block { margin-top: 0; }
 .drawer-search { display: flex; align-items: center; gap: 8px; }
 .drawer-search input { flex: 1; min-width: 0; }
-.drawer-user-zone .drawer-user { margin-bottom: 8px; }
+.drawer-user-zone .drawer-user { margin-bottom: 2px; padding: 2px 8px; }
 .drawer-nav { display: flex; flex-direction: column; gap: 2px; }
 .drawer-nav-item {
   display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
@@ -358,6 +358,21 @@ label.check input { width: auto; }
 .md-tool:disabled { opacity: .5; cursor: default; }
 .md-tool-bold { font-weight: 700; color: var(--text); }
 .md-tool-italic { font-style: italic; font-family: Georgia, "Times New Roman", serif; }
+.md-tool-wrap { display: inline-flex; flex: none; }
+.md-tool-color { flex-direction: column; gap: 2px; }
+.md-tool-color-a { font-size: 12px; font-weight: 700; color: var(--text); line-height: 1; }
+.md-tool-color-bar { width: 14px; height: 3px; border-radius: 2px; background: var(--red); }
+.color-pop {
+  position: fixed; z-index: 120; width: 248px; max-width: calc(100vw - 16px);
+  background: var(--card); border: 1px solid var(--border); border-radius: var(--r-pop);
+  box-shadow: var(--shadow-pop); padding: 10px;
+  display: grid; grid-template-columns: repeat(8, 1fr); gap: 7px;
+}
+.color-dot { width: 22px; height: 22px; border-radius: 50%; border: 1px solid rgba(0, 0, 0, .14); padding: 0; cursor: pointer; justify-self: center; }
+.color-dot:hover { transform: scale(1.12); }
+.color-reset { grid-column: 1 / -1; padding: 4px 0 0; font-size: 13px; color: var(--muted); text-align: center; }
+.color-reset:hover { color: var(--text); }
+.seg-wrap { flex-wrap: wrap; }
 .md-tool-mono { font-family: "Roboto Mono", Consolas, monospace; }
 .swap-preview { padding: 12px; overflow-y: auto; min-height: 359px; max-height: 560px; }
 .editor-options { margin-top: 14px; display: flex; flex-direction: column; gap: 12px; }
@@ -432,10 +447,11 @@ th { color: var(--muted); font-weight: 500; font-size: 13px; }
   .search-btn, .theme-btn, .compose-btn, .guest-btn, .user-menu-wrap { display: none !important; }
   /* 手机端：日历/标签由抽屉承载，信息流下方不再堆侧栏卡 */
   .home-layout .side { display: none; }
-  .drawer-root { display: block; position: fixed; inset: 0; z-index: 90; pointer-events: none; }
+  .drawer-root { display: block; position: fixed; inset: 0; height: 100vh; height: 100dvh; z-index: 90; pointer-events: none; }
   .drawer-backdrop { position: absolute; inset: 0; background: rgba(43, 37, 28, .45); opacity: 0; transition: opacity .28s ease; }
   .drawer {
     position: absolute; top: 0; left: 0; bottom: 0; width: min(300px, 84vw);
+    height: 100vh; height: 100dvh; max-height: 100dvh;
     background: var(--card); box-shadow: var(--shadow-pop);
     transform: translateX(-103%); transition: transform .3s ease;
     display: flex; flex-direction: column; overflow-y: auto; overscroll-behavior: contain;
