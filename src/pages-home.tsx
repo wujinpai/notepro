@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, fmtTime, type CommentInfo, type NoteInfo, type SiteInfo, type UserInfo } from "./api";
-import { Avatar, Lightbox, NoteCard, ShareDialog, imageHit } from "./components";
+import { Avatar, Lightbox, MoonIcon, NoteCard, PlaneIcon, ShareDialog, SunIcon, imageHit } from "./components";
 import { renderMarkdown } from "./md";
 
 export function Calendar({ month, days, selected, onMonth, onSelect }: {
@@ -45,16 +45,17 @@ export function Calendar({ month, days, selected, onMonth, onSelect }: {
   );
 }
 
-export function HomePage({ user, site, onOpenNote, onComment, drawerOpen, onCloseDrawer, onOpenAuth }: {
+export function HomePage({ user, site, onOpenNote, onComment, q, onSearch, theme, onToggleTheme, onLogout, drawerOpen, onCloseDrawer, onOpenAuth }: {
   user: UserInfo | null; site: SiteInfo; onOpenNote: (n: NoteInfo) => void;
   onComment: (n: NoteInfo) => void;
+  q: string; onSearch: (v: string) => void;
+  theme: "light" | "dark"; onToggleTheme: () => void; onLogout: () => void;
   drawerOpen: boolean; onCloseDrawer: () => void; onOpenAuth: () => void;
 }) {
   const [notes, setNotes] = useState<NoteInfo[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [tag, setTag] = useState("");
-  const [q, setQ] = useState("");
   const [tags, setTags] = useState<{ name: string; count: number }[]>([]);
   const now = new Date();
   const [month, setMonth] = useState(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`);
@@ -72,6 +73,8 @@ export function HomePage({ user, site, onOpenNote, onComment, drawerOpen, onClos
     } catch { setNotes([]); setTotal(0); }
   }, [page, tag, q, date]);
 
+  // 搜索词来自顶栏弹出条 / 抽屉搜索框（同一状态），变化时回第一页
+  useEffect(() => { setPage(1); }, [q]);
   useEffect(() => { void load(); }, [load]);
   useEffect(() => {
     api.get<{ tags: { name: string; count: number }[] }>("/api/tags").then((d) => setTags(d.tags)).catch(() => setTags([]));
@@ -94,10 +97,12 @@ export function HomePage({ user, site, onOpenNote, onComment, drawerOpen, onClos
     <>
     <div className="home-layout">
       <section className="feed">
-        <div className="feed-tools">
-          <input className="search" value={q} placeholder="搜索标题或正文…" onChange={(e) => { setQ(e.target.value); setPage(1); }} />
-          {tag && <button className="chip chip-on" onClick={() => setTag("")}>#{tag} ✕</button>}
-        </div>
+        {(q || tag) && (
+          <div className="feed-tools">
+            {q && <button className="chip chip-on" onClick={() => onSearch("")}>搜索「{q}」 ✕</button>}
+            {tag && <button className="chip chip-on" onClick={() => setTag("")}>#{tag} ✕</button>}
+          </div>
+        )}
         {notes.length === 0 && <div className="empty">暂无笔记{user ? "，点击右上角「独白」发布第一篇" : ""}。</div>}
         {notes.map((n) => <NoteCard key={n.id} note={n} onOpen={onOpenNote} onComment={onComment} />)}
         {total > 20 && (
@@ -173,6 +178,13 @@ export function HomePage({ user, site, onOpenNote, onComment, drawerOpen, onClos
           {site.subtitle && <span className="brand-sub">{site.subtitle}</span>}
         </button>
         <div className="drawer-sec">
+          <div className="drawer-search">
+            <input value={q} placeholder="搜索标题或正文…" aria-label="搜索标题或正文"
+              onChange={(e) => onSearch(e.target.value)} />
+            {q && <button type="button" className="icon-btn search-clear" aria-label="清除搜索" onClick={() => onSearch("")}>✕</button>}
+          </div>
+        </div>
+        <div className="drawer-sec">
           <h5>日历归档</h5>
           <Calendar month={month} days={days} selected={date} onMonth={setMonth}
             onSelect={(d) => { setDate(d); setPage(1); onCloseDrawer(); }} />
@@ -189,16 +201,30 @@ export function HomePage({ user, site, onOpenNote, onComment, drawerOpen, onClos
             ))}
           </div>
         </div>
+        <div className="drawer-sec">
+          <button type="button" className="drawer-nav-item" onClick={onToggleTheme}>
+            {theme === "dark" ? <SunIcon /> : <MoonIcon />}
+            <span>外观</span>
+            <span className="muted tiny drawer-nav-right">{theme === "dark" ? "夜晚" : "白天"}</span>
+          </button>
+        </div>
         <div className="drawer-foot">
           {user ? (
-            <a className="drawer-user" href="#me" onClick={onCloseDrawer}>
-              <Avatar url={user.avatar} name={user.nickname} size={40} />
-              <span className="drawer-user-meta">
-                <strong>{user.nickname}</strong>
-                <span className="muted tiny">@{user.username}</span>
-              </span>
-              <span className="muted tiny">用户中心 ›</span>
-            </a>
+            <div className="drawer-user-zone">
+              <div className="drawer-user">
+                <Avatar url={user.avatar} name={user.nickname} size={40} />
+                <span className="drawer-user-meta">
+                  <strong>{user.nickname}</strong>
+                  <span className="muted tiny">@{user.username}</span>
+                </span>
+              </div>
+              <nav className="drawer-nav">
+                <a className="drawer-nav-item" href="#me" onClick={onCloseDrawer}>用户中心</a>
+                <a className="drawer-nav-item" href="#me/notes" onClick={onCloseDrawer}>我的笔记</a>
+                {user.role === "admin" && <a className="drawer-nav-item" href="#admin" onClick={onCloseDrawer}>管理后台</a>}
+                <button type="button" className="drawer-nav-item danger" onClick={() => { onCloseDrawer(); onLogout(); }}>退出登录</button>
+              </nav>
+            </div>
           ) : (
             <button type="button" className="btn btn-primary btn-block" onClick={() => { onCloseDrawer(); onOpenAuth(); }}>登录 / 注册</button>
           )}
@@ -246,7 +272,7 @@ export function NoteDetail({ noteId, user, onBack, onEdit, onDeleted, focusComme
       {lb && <Lightbox images={lb.images} index={lb.index} onClose={() => setLb(null)} />}
       {note.tags.length > 0 && <div className="tag-row">{note.tags.map((t) => <span key={t} className="chip">#{t}</span>)}</div>}
       <div className="row-gap">
-        <button className="btn btn-ghost" onClick={() => setShareOpen(true)}>分享</button>
+        <button type="button" className="act-btn" aria-label="分享" title="分享" onClick={() => setShareOpen(true)}><PlaneIcon /></button>
         {mine && user!.id === note.userId && <button className="btn btn-ghost" onClick={() => onEdit(note)}>编辑</button>}
         {mine && <button className="btn btn-danger" onClick={() => void del()}>删除</button>}
       </div>

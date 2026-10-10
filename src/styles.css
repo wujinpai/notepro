@@ -40,9 +40,26 @@ img { max-width: 100%; }
 
 /* 顶栏 */
 .topbar {
-  position: sticky; top: 0; z-index: 40; display: flex; align-items: center; gap: 12px;
+  position: sticky; top: 0; z-index: 40; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
   padding: 10px 16px; background: var(--bg); border-bottom: 1px solid var(--border);
 }
+/* 搜索弹出条（顶栏第二行整条展开） */
+.search-bar { flex: 1 1 100%; display: flex; align-items: center; gap: 8px; min-width: 0; }
+.search-bar input { flex: 1; min-width: 0; }
+.search-bar-ic { color: var(--muted); display: inline-flex; flex: none; }
+.search-bar-ic svg { display: block; }
+.search-clear { width: 30px; height: 30px; font-size: 13px; }
+.search-btn.on { color: var(--blue); background: var(--chip); }
+/* 卡片/详情扁平图标操作按钮（评论气泡、分享纸飞机） */
+.act-btn {
+  display: inline-flex; align-items: center; gap: 5px; padding: 5px 8px;
+  border-radius: var(--r-ctl); color: var(--muted); background: none; border: none;
+}
+.act-btn svg { display: block; }
+button.act-btn:hover { background: var(--surface); color: var(--text); }
+.act-btn.off { cursor: default; opacity: .6; }
+.act-count { font-size: 13px; line-height: 1; }
+.act-off-text { font-size: 12px; }
 .brand { display: flex; align-items: center; gap: 10px; color: var(--text); min-width: 0; }
 .brand-badge {
   width: 34px; height: 34px; background: var(--blue); color: #fff; font-weight: 700; font-size: 19px;
@@ -156,6 +173,18 @@ a.side-user:hover { border-color: var(--blue); }
 .drawer-sec h5 { font-size: 13px; color: var(--muted); font-weight: 600; margin-bottom: 10px; }
 .drawer-foot { margin-top: auto; padding: 14px 16px; border-top: 1px solid var(--border); }
 .drawer-foot .btn-block { margin-top: 0; }
+.drawer-search { display: flex; align-items: center; gap: 8px; }
+.drawer-search input { flex: 1; min-width: 0; }
+.drawer-user-zone .drawer-user { margin-bottom: 8px; }
+.drawer-nav { display: flex; flex-direction: column; gap: 2px; }
+.drawer-nav-item {
+  display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+  padding: 10px 8px; border-radius: var(--r-ctl); color: var(--text); font-size: 15px;
+}
+.drawer-nav-item svg { display: block; flex: none; }
+a.drawer-nav-item:hover, button.drawer-nav-item:hover { background: var(--surface); }
+.drawer-nav-item.danger { color: var(--red); }
+.drawer-nav-right { margin-left: auto; }
 .drawer-user { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; color: var(--text); }
 .drawer-user-meta { display: flex; flex-direction: column; min-width: 0; margin-right: auto; }
 .drawer-user-meta strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -399,6 +428,8 @@ th { color: var(--muted); font-weight: 500; font-size: 13px; }
   .container { padding: 14px 10px 32px; }
   .user-chip span { display: none; }
   .icon-btn.menu-btn { display: inline-flex; }
+  /* 移动端顶栏精简：搜索/主题/独白/头像/游客登录注册全部收进抽屉，右侧只留登录后的笔 */
+  .search-btn, .theme-btn, .compose-btn, .guest-btn, .user-menu-wrap { display: none !important; }
   /* 手机端：日历/标签由抽屉承载，信息流下方不再堆侧栏卡 */
   .home-layout .side { display: none; }
   .drawer-root { display: block; position: fixed; inset: 0; z-index: 90; pointer-events: none; }
@@ -416,6 +447,7 @@ th { color: var(--muted); font-weight: 500; font-size: 13px; }
 
 /* 桌面端（沿用全站 860px 断点）：Memos 式左栏 + 右主栏 */
 @media (min-width: 861px) {
+  .pen-btn { display: none; }
   .home-layout { grid-template-columns: 280px minmax(0, 1fr); }
   .home-layout .feed { grid-column: 2; grid-row: 1; }
   .home-layout .side {

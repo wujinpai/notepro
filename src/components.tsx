@@ -3,6 +3,73 @@ import QRCode from "qrcode";
 import { api, fmtTime, type NoteInfo, type SiteInfo, type UserInfo } from "./api";
 import { excerpt, imagesOf } from "./md";
 
+// ---------- 扁平线条图标（stroke=currentColor，全站统一） ----------
+const line = {
+  fill: "none", stroke: "currentColor", strokeWidth: 2,
+  strokeLinecap: "round", strokeLinejoin: "round",
+} as const;
+
+export function SunIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <circle cx="12" cy="12" r="4.4" fill="currentColor" />
+      <g stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+        <line x1="12" y1="2.6" x2="12" y2="5.1" />
+        <line x1="12" y1="18.9" x2="12" y2="21.4" />
+        <line x1="2.6" y1="12" x2="5.1" y2="12" />
+        <line x1="18.9" y1="12" x2="21.4" y2="12" />
+        <line x1="5.2" y1="5.2" x2="7" y2="7" />
+        <line x1="17" y1="17" x2="18.8" y2="18.8" />
+        <line x1="18.8" y1="5.2" x2="17" y2="7" />
+        <line x1="7" y1="17" x2="5.2" y2="18.8" />
+      </g>
+    </svg>
+  );
+}
+
+export function MoonIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path fill="currentColor" d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+    </svg>
+  );
+}
+
+export function SearchIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" focusable="false" {...line}>
+      <circle cx="11" cy="11" r="7" />
+      <path d="m21 21-4.35-4.35" />
+    </svg>
+  );
+}
+
+export function PenIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" focusable="false" {...line}>
+      <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
+      <path d="m15 5 4 4" />
+    </svg>
+  );
+}
+
+export function BubbleIcon() {
+  return (
+    <svg width="19" height="19" viewBox="0 0 24 24" aria-hidden="true" focusable="false" {...line}>
+      <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
+    </svg>
+  );
+}
+
+export function PlaneIcon() {
+  return (
+    <svg width="19" height="19" viewBox="0 0 24 24" aria-hidden="true" focusable="false" {...line}>
+      <path d="m22 2-7 20-4-9-9-4Z" />
+      <path d="M22 2 11 13" />
+    </svg>
+  );
+}
+
 export function Avatar({ url, name, size = 36 }: { url: string; name: string; size?: number }) {
   const style = { width: size, height: size, fontSize: Math.max(12, size * 0.42) };
   if (url) return <img className="avatar" style={style} src={url} alt={name} />;
@@ -395,13 +462,17 @@ export function NoteCard({ note, onOpen, onComment }: {
       {note.tags.length > 0 && <div className="tag-row">{note.tags.map((t) => <span key={t} className="chip">#{t}</span>)}</div>}
       <div className="note-card-foot">
         {note.allowComments ? (
-          <button type="button" className="text-btn" onClick={(e) => { e.stopPropagation(); onComment(note); }}>
-            评论{note.commentCount > 0 ? ` · ${note.commentCount}` : ""}
+          <button type="button" className="act-btn" aria-label={`评论（${note.commentCount} 条）`} title="评论"
+            onClick={(e) => { e.stopPropagation(); onComment(note); }}>
+            <BubbleIcon /><span className="act-count">{note.commentCount}</span>
           </button>
         ) : (
-          <span className="muted tiny">评论已关闭</span>
+          <span className="act-btn off" role="img" aria-label="评论已关闭" title="评论已关闭">
+            <BubbleIcon /><span className="act-off-text">评论已关闭</span>
+          </span>
         )}
-        <button type="button" className="text-btn share-act" onClick={(e) => { e.stopPropagation(); setShareOpen(true); }}>分享</button>
+        <button type="button" className="act-btn share-act" aria-label="分享" title="分享"
+          onClick={(e) => { e.stopPropagation(); setShareOpen(true); }}><PlaneIcon /></button>
       </div>
     </article>
     {lb && <Lightbox images={lb.images} index={lb.index} onClose={() => setLb(null)} />}

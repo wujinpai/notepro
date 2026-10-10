@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type NoteInfo, type SiteInfo, type UserInfo } from "./api";
-import { AuthDialog, Avatar } from "./components";
+import { AuthDialog, Avatar, MoonIcon, PenIcon, SearchIcon, SunIcon } from "./components";
 import { HomePage, NoteDetail } from "./pages-home";
 import { SharePage } from "./pages-share";
 import { EditorPage } from "./pages-editor";
@@ -32,32 +32,6 @@ function useTheme() {
   return { theme, toggle };
 }
 
-function SunIcon() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-      <circle cx="12" cy="12" r="4.4" fill="currentColor" />
-      <g stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-        <line x1="12" y1="2.6" x2="12" y2="5.1" />
-        <line x1="12" y1="18.9" x2="12" y2="21.4" />
-        <line x1="2.6" y1="12" x2="5.1" y2="12" />
-        <line x1="18.9" y1="12" x2="21.4" y2="12" />
-        <line x1="5.2" y1="5.2" x2="7" y2="7" />
-        <line x1="17" y1="17" x2="18.8" y2="18.8" />
-        <line x1="18.8" y1="5.2" x2="17" y2="7" />
-        <line x1="7" y1="17" x2="5.2" y2="18.8" />
-      </g>
-    </svg>
-  );
-}
-
-function MoonIcon() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-      <path fill="currentColor" d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
-    </svg>
-  );
-}
-
 function MenuIcon() {
   return (
     <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
@@ -77,6 +51,10 @@ export default function App() {
   const [editNote, setEditNote] = useState<NoteInfo | null>(null);
   const [editLoaded, setEditLoaded] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  // 搜索词提升到顶层：顶栏弹出条（桌面）与抽屉搜索框（移动端）共用同一状态
+  const [q, setQ] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
+  const searchRef = useRef<HTMLInputElement>(null);
   // 游客在信息流点「评论」先登录，登录成功后自动续跳到该篇详情评论区
   const [pendingComment, setPendingComment] = useState<number | null>(null);
   const [commentFocus, setCommentFocus] = useState<number | null>(null);
@@ -100,10 +78,19 @@ export default function App() {
   }, [refreshUser]);
 
   useEffect(() => {
-    const onHash = () => { setRoute(location.hash); setMenuOpen(false); setDrawerOpen(false); window.scrollTo(0, 0); };
+    const onHash = () => { setRoute(location.hash); setMenuOpen(false); setDrawerOpen(false); setSearchOpen(false); window.scrollTo(0, 0); };
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
+
+  // 搜索条展开时自动聚焦；Esc 收起（过滤词保留，图标亮起表示仍在过滤）
+  useEffect(() => {
+    if (!searchOpen) return;
+    searchRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setSearchOpen(false); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [searchOpen]);
 
   // 头像菜单：点外部 / Esc 关闭（仅作用于该菜单）
   useEffect(() => {
@@ -161,6 +148,10 @@ export default function App() {
     if (!isHome) go("#");
     setDrawerOpen(true);
   };
+  const toggleSearch = () => {
+    if (!isHome) go("#");
+    setSearchOpen((s) => !s);
+  };
   const onAuthed = (u: UserInfo) => {
     setUser(u);
     if (pendingComment) {
@@ -185,10 +176,12 @@ export default function App() {
           {site.subtitle && <span className="brand-sub">{site.subtitle}</span>}
         </a>
         <nav className="top-actions">
-          <button className="icon-btn" onClick={toggle} title={theme === "dark" ? "切换到白天" : "切换到夜晚"} aria-label="切换主题">{theme === "dark" ? <SunIcon /> : <MoonIcon />}</button>
+          <button className={`icon-btn search-btn${q ? " on" : ""}`} onClick={toggleSearch} aria-label="搜索" title="搜索" aria-expanded={searchOpen}><SearchIcon /></button>
+          <button className="icon-btn theme-btn" onClick={toggle} title={theme === "dark" ? "切换到白天" : "切换到夜晚"} aria-label="切换主题">{theme === "dark" ? <SunIcon /> : <MoonIcon />}</button>
           {user ? (
             <>
-              <button className="btn btn-primary" onClick={() => openEdit(null)}>独白</button>
+              <button className="icon-btn pen-btn" onClick={() => openEdit(null)} aria-label="写独白" title="写独白"><PenIcon /></button>
+              <button className="btn btn-primary compose-btn" onClick={() => openEdit(null)}>独白</button>
               <div className="user-menu-wrap" ref={menuRef}>
                 <button className="user-chip" onClick={() => setMenuOpen(!menuOpen)}>
                   <Avatar url={user.avatar} name={user.nickname} size={30} />
@@ -206,11 +199,20 @@ export default function App() {
             </>
           ) : (
             <>
-              <button className="btn btn-ghost" onClick={() => setAuthOpen(true)}>登录</button>
-              {site.registerOpen && <button className="btn btn-primary" onClick={() => setAuthOpen(true)}>注册</button>}
+              <button className="btn btn-ghost guest-btn" onClick={() => setAuthOpen(true)}>登录</button>
+              {site.registerOpen && <button className="btn btn-primary guest-btn" onClick={() => setAuthOpen(true)}>注册</button>}
             </>
           )}
         </nav>
+        {searchOpen && (
+          <div className="search-bar">
+            <span className="search-bar-ic"><SearchIcon /></span>
+            <input ref={searchRef} value={q} placeholder="搜索标题或正文…" aria-label="搜索标题或正文"
+              onChange={(e) => setQ(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Escape") setSearchOpen(false); }} />
+            {q && <button type="button" className="icon-btn search-clear" aria-label="清除搜索" onClick={() => setQ("")}>✕</button>}
+          </div>
+        )}
       </header>
 
       <main className="container">
@@ -227,6 +229,7 @@ export default function App() {
             focusComments={commentFocus === Number(noteId)} onAuthRequest={() => setAuthOpen(true)} />
         ) : (
           <HomePage user={user} site={site} onOpenNote={openNote} onComment={openComment}
+            q={q} onSearch={setQ} theme={theme} onToggleTheme={toggle} onLogout={() => void logout()}
             drawerOpen={drawerOpen} onCloseDrawer={() => setDrawerOpen(false)} onOpenAuth={() => setAuthOpen(true)} />
         )}
       </main>

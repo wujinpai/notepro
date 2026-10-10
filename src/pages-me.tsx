@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, fmtTime, type NoteInfo, type SiteInfo, type UserInfo } from "./api";
-import { Avatar, Lightbox, Modal, ShareDialog, SliderCaptcha, imageHit } from "./components";
+import { Avatar, Lightbox, Modal, PlaneIcon, ShareDialog, SliderCaptcha, imageHit } from "./components";
 import { excerpt, renderMarkdown } from "./md";
 
 interface SessionRow { id: number; ua: string; ip: string; created_at: number; current: boolean }
@@ -271,7 +271,7 @@ function MyNotesTab({ onEditNote, onOpenNote }: { onEditNote: (n: NoteInfo) => v
               ? <button className="btn btn-ghost btn-sm" onClick={() => void toggle(n, { visibility: "public" })}>设为公开</button>
               : <button className="btn btn-ghost btn-sm" onClick={() => void toggle(n, { visibility: "private" })}>设为私密</button>}
             <button className="btn btn-ghost btn-sm" onClick={() => void toggle(n, { archived: !n.archived })}>{n.archived ? "取消归档" : "归档"}</button>
-            <button className="btn btn-ghost btn-sm" onClick={() => setShareNote(n)}>分享</button>
+            <button type="button" className="act-btn" aria-label="分享" title="分享" onClick={() => setShareNote(n)}><PlaneIcon /></button>
             <button className="btn btn-danger btn-sm" onClick={() => void del(n)}>删除</button>
           </div>
         </div>
