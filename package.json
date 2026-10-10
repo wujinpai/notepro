@@ -1,0 +1,34 @@
+{
+  "name": "notepro",
+  "version": "1.0.0",
+  "private": true,
+  "description": "NotePro 多用户笔记广场（React + Express + SQLite）",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.server.json && vite build",
+    "dev": "vite",
+    "dev:server": "tsx watch server/index.ts",
+    "start": "node dist/server/index.js",
+    "test": "node scripts/e2e.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.server.json && tsc --noEmit -p tsconfig.app.json"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "multer": "^2.0.1",
+    "nodemailer": "^6.10.1"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/multer": "^2.0.0",
+    "@types/node": "^24.0.0",
+    "@types/nodemailer": "^6.4.17",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3",
+    "vite": "^6.0.3"
+  }
+}
