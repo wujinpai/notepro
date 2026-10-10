@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, fmtTime, type NoteInfo, type SiteInfo, type UserInfo } from "./api";
-import { Avatar, Modal, SliderCaptcha } from "./components";
+import { Avatar, Lightbox, Modal, SliderCaptcha, imageHit } from "./components";
 import { excerpt, renderMarkdown } from "./md";
 
 interface SessionRow { id: number; ua: string; ip: string; created_at: number; current: boolean }
@@ -223,6 +223,7 @@ function SecurityTab({ user, refreshUser }: { user: UserInfo; refreshUser: () =>
 function MyNotesTab({ onEditNote, onOpenNote }: { onEditNote: (n: NoteInfo) => void; onOpenNote: (n: NoteInfo) => void }) {
   const [filter, setFilter] = useState("all");
   const [notes, setNotes] = useState<NoteInfo[]>([]);
+  const [lb, setLb] = useState<{ images: string[]; index: number } | null>(null);
   const load = useCallback(() => {
     api.get<{ notes: NoteInfo[] }>(`/api/me/notes?filter=${filter}`).then((d) => setNotes(d.notes)).catch(() => setNotes([]));
   }, [filter]);
@@ -246,17 +247,22 @@ function MyNotesTab({ onEditNote, onOpenNote }: { onEditNote: (n: NoteInfo) => v
         ))}
       </div>
       {notes.length === 0 && <p className="muted tiny">暂无笔记</p>}
-      {notes.map((n) => (
+      {notes.map((n) => {
+        const label = n.title || excerpt(n.content, 48);
+        return (
         <div key={n.id} className="my-note-item">
           <div className="my-note-head">
-            <button className="my-note-title" onClick={() => onOpenNote(n)}>
-              {n.title || excerpt(n.content, 48) || "（无内容）"}
-            </button>
+            {label && (
+              <button className="my-note-title" onClick={() => onOpenNote(n)}>
+                {label}
+              </button>
+            )}
             {n.pinned && <span className="badge badge-pin">置顶</span>}
             <span className="badge">{n.archived ? "归档" : n.visibility === "private" ? "私密" : "公开"}</span>
             <span className="muted tiny">{fmtTime(n.createdAt)}</span>
           </div>
-          <div className="my-note-preview markdown" onClick={() => onOpenNote(n)}
+          <div className="my-note-preview markdown"
+            onClick={(e) => { const hit = imageHit(e); if (hit) { setLb(hit); return; } onOpenNote(n); }}
             dangerouslySetInnerHTML={{ __html: renderMarkdown(n.content) }} />
           <div className="row-gap">
             <button className="btn btn-ghost btn-sm" onClick={() => onEditNote(n)}>编辑</button>
@@ -267,7 +273,9 @@ function MyNotesTab({ onEditNote, onOpenNote }: { onEditNote: (n: NoteInfo) => v
             <button className="btn btn-danger btn-sm" onClick={() => void del(n)}>删除</button>
           </div>
         </div>
-      ))}
+        );
+      })}
+      {lb && <Lightbox images={lb.images} index={lb.index} onClose={() => setLb(null)} />}
     </div>
   );
 }

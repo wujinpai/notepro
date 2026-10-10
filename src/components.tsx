@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, fmtTime, type NoteInfo, type SiteInfo, type UserInfo } from "./api";
-import { excerpt, firstImage } from "./md";
+import { excerpt, imagesOf } from "./md";
 
 export function Avatar({ url, name, size = 36 }: { url: string; name: string; size?: number }) {
   const style = { width: size, height: size, fontSize: Math.max(12, size * 0.42) };
@@ -253,10 +253,49 @@ export function TagInput({ value, onChange, suggestions }: { value: string[]; on
   );
 }
 
+// ---------- 大图预览（Lightbox） ----------
+export function Lightbox({ images, index, onClose }: { images: string[]; index: number; onClose: () => void }) {
+  const [cur, setCur] = useState(index);
+  useEffect(() => { setCur(index); }, [index]);
+  const go = useCallback((d: number) => setCur((c) => (c + d + images.length) % images.length), [images.length]);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+      else if (e.key === "ArrowLeft") go(-1);
+      else if (e.key === "ArrowRight") go(1);
+    };
+    document.addEventListener("keydown", onKey);
+    document.body.style.overflow = "hidden";
+    return () => { document.removeEventListener("keydown", onKey); document.body.style.overflow = ""; };
+  }, [go, onClose]);
+  if (!images.length) return null;
+  return (
+    <div className="lightbox" onClick={onClose} role="dialog" aria-modal="true" aria-label="图片预览">
+      <button type="button" className="lb-btn lb-close" aria-label="关闭" onClick={onClose}>✕</button>
+      {images.length > 1 && <button type="button" className="lb-btn lb-prev" aria-label="上一张" onClick={(e) => { e.stopPropagation(); go(-1); }}>‹</button>}
+      <img className="lb-img" src={images[cur]} alt="" onClick={(e) => e.stopPropagation()} />
+      {images.length > 1 && <button type="button" className="lb-btn lb-next" aria-label="下一张" onClick={(e) => { e.stopPropagation(); go(1); }}>›</button>}
+      {images.length > 1 && <div className="lb-count">{cur + 1} / {images.length}</div>}
+    </div>
+  );
+}
+
+// 渲染区点击命中图片：返回该容器内全部图片与被点序号（未命中返回 null）
+export function imageHit(e: React.MouseEvent): { images: string[]; index: number } | null {
+  const t = e.target as HTMLElement;
+  if (t.tagName !== "IMG") return null;
+  const root = e.currentTarget as HTMLElement;
+  const srcs = Array.from(root.querySelectorAll("img")).map((im) => (im as HTMLImageElement).src);
+  const idx = srcs.indexOf((t as HTMLImageElement).src);
+  return idx >= 0 ? { images: srcs, index: idx } : null;
+}
+
 // ---------- 笔记卡片 ----------
 export function NoteCard({ note, onOpen }: { note: NoteInfo; onOpen: (n: NoteInfo) => void }) {
-  const img = firstImage(note.content);
+  const imgs = imagesOf(note.content);
+  const [lb, setLb] = useState<{ images: string[]; index: number } | null>(null);
   return (
+    <>
     <article className="note-card" onClick={() => onOpen(note)}>
       <header>
         {note.author && <Avatar url={note.author.avatar} name={note.author.nickname} size={34} />}
@@ -275,9 +314,18 @@ export function NoteCard({ note, onOpen }: { note: NoteInfo; onOpen: (n: NoteInf
         </div>
       )}
       {note.title && <h3>{note.title}</h3>}
-      <p className="note-excerpt">{excerpt(note.content)}</p>
-      {img && <img className="note-thumb" src={img} alt="" loading="lazy" />}
+      {excerpt(note.content) && <p className="note-excerpt">{excerpt(note.content)}</p>}
+      {imgs.length > 0 && (
+        <div className={`img-grid cols-${imgs.length === 1 ? 1 : imgs.length <= 4 ? 2 : 3}`}>
+          {imgs.map((src, i) => (
+            <img key={i} src={src} alt="" loading="lazy"
+              onClick={(e) => { e.stopPropagation(); setLb({ images: imgs, index: i }); }} />
+          ))}
+        </div>
+      )}
       {note.tags.length > 0 && <div className="tag-row">{note.tags.map((t) => <span key={t} className="chip">#{t}</span>)}</div>}
     </article>
+    {lb && <Lightbox images={lb.images} index={lb.index} onClose={() => setLb(null)} />}
+    </>
   );
 }

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, type NoteInfo, type UserInfo } from "./api";
-import { NoteCard } from "./components";
+import { Lightbox, NoteCard, imageHit } from "./components";
 import { renderMarkdown } from "./md";
 
 export function Calendar({ month, days, selected, onMonth, onSelect }: {
@@ -45,10 +45,9 @@ export function Calendar({ month, days, selected, onMonth, onSelect }: {
   );
 }
 
-export function HomePage({ user, onOpenNote, onRequireLogin }: {
-  user: UserInfo | null; onOpenNote: (n: NoteInfo) => void; onRequireLogin: () => void;
+export function HomePage({ user, onOpenNote }: {
+  user: UserInfo | null; onOpenNote: (n: NoteInfo) => void;
 }) {
-  const [tab, setTab] = useState<"square" | "mine">("square");
   const [notes, setNotes] = useState<NoteInfo[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -61,9 +60,7 @@ export function HomePage({ user, onOpenNote, onRequireLogin }: {
   const [date, setDate] = useState("");
 
   const load = useCallback(async () => {
-    const mine = tab === "mine";
     const params = new URLSearchParams({ page: String(page), size: "20" });
-    if (mine) params.set("mine", "1");
     if (tag) params.set("tag", tag);
     if (q) params.set("q", q);
     if (date) params.set("date", date);
@@ -71,32 +68,24 @@ export function HomePage({ user, onOpenNote, onRequireLogin }: {
       const d = await api.get<{ notes: NoteInfo[]; total: number }>(`/api/notes?${params}`);
       setNotes(d.notes); setTotal(d.total);
     } catch { setNotes([]); setTotal(0); }
-  }, [tab, page, tag, q, date]);
+  }, [page, tag, q, date]);
 
   useEffect(() => { void load(); }, [load]);
   useEffect(() => {
-    const mine = tab === "mine";
-    api.get<{ tags: { name: string; count: number }[] }>(`/api/tags${mine ? "?mine=1" : ""}`).then((d) => setTags(d.tags)).catch(() => setTags([]));
-    api.get<{ days: Record<string, number> }>(`/api/calendar?month=${month}${mine ? "&mine=1" : ""}`).then((d) => setDays(d.days)).catch(() => setDays({}));
-  }, [tab, month, user]);
+    api.get<{ tags: { name: string; count: number }[] }>("/api/tags").then((d) => setTags(d.tags)).catch(() => setTags([]));
+    api.get<{ days: Record<string, number> }>(`/api/calendar?month=${month}`).then((d) => setDays(d.days)).catch(() => setDays({}));
+  }, [month, user]);
 
-  const switchTab = (t: "square" | "mine") => {
-    if (t === "mine" && !user) { onRequireLogin(); return; }
-    setTab(t); setPage(1);
-  };
+  const [calOpen, setCalOpen] = useState(false);
 
   return (
     <div className="home-layout">
       <section className="feed">
-        <div className="seg">
-          <button className={tab === "square" ? "on" : ""} onClick={() => switchTab("square")}>笔记广场</button>
-          <button className={tab === "mine" ? "on" : ""} onClick={() => switchTab("mine")}>我的笔记</button>
-        </div>
         <div className="feed-tools">
           <input className="search" value={q} placeholder="搜索标题或正文…" onChange={(e) => { setQ(e.target.value); setPage(1); }} />
           {tag && <button className="chip chip-on" onClick={() => setTag("")}>#{tag} ✕</button>}
         </div>
-        {notes.length === 0 && <div className="empty">暂无笔记{user ? "，点击右上角「写笔记」发布第一篇" : ""}。</div>}
+        {notes.length === 0 && <div className="empty">暂无笔记{user ? "，点击右上角「独白」发布第一篇" : ""}。</div>}
         {notes.map((n) => <NoteCard key={n.id} note={n} onOpen={onOpenNote} />)}
         {total > 20 && (
           <div className="pager">
@@ -107,9 +96,19 @@ export function HomePage({ user, onOpenNote, onRequireLogin }: {
         )}
       </section>
       <aside className="side">
-        <div className="side-card">
-          <h4>日历归档</h4>
-          <Calendar month={month} days={days} selected={date} onMonth={setMonth} onSelect={(d) => { setDate(d); setPage(1); }} />
+        <div className="side-card cal-card">
+          <button type="button" className="cal-toggle" aria-expanded={calOpen} onClick={() => setCalOpen(!calOpen)}>
+            <span className="cal-toggle-title">日历归档</span>
+            {date && <span className="muted tiny">{date}</span>}
+            <svg className={`cal-chevron${calOpen ? " open" : ""}`} width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+          <div className={`cal-collapse${calOpen ? " open" : ""}`}>
+            <div className="cal-collapse-inner">
+              <Calendar month={month} days={days} selected={date} onMonth={setMonth} onSelect={(d) => { setDate(d); setPage(1); }} />
+            </div>
+          </div>
         </div>
         <div className="side-card">
           <h4>标签</h4>
@@ -133,6 +132,7 @@ export function NoteDetail({ noteId, user, onBack, onEdit, onDeleted }: {
 }) {
   const [note, setNote] = useState<NoteInfo | null>(null);
   const [error, setError] = useState("");
+  const [lb, setLb] = useState<{ images: string[]; index: number } | null>(null);
   useEffect(() => {
     api.get<{ note: NoteInfo }>(`/api/notes/${noteId}`).then((d) => setNote(d.note)).catch((e) => setError((e as Error).message));
   }, [noteId]);
@@ -156,7 +156,9 @@ export function NoteDetail({ noteId, user, onBack, onEdit, onDeleted }: {
         {note.visibility === "private" && <span className="badge">私密</span>}
         {note.archived && <span className="badge">归档</span>}
       </div>
-      <div className="markdown" dangerouslySetInnerHTML={{ __html: renderMarkdown(note.content) }} />
+      <div className="markdown" onClick={(e) => { const hit = imageHit(e); if (hit) setLb(hit); }}
+        dangerouslySetInnerHTML={{ __html: renderMarkdown(note.content) }} />
+      {lb && <Lightbox images={lb.images} index={lb.index} onClose={() => setLb(null)} />}
       {note.tags.length > 0 && <div className="tag-row">{note.tags.map((t) => <span key={t} className="chip">#{t}</span>)}</div>}
       {mine && (
         <div className="row-gap">

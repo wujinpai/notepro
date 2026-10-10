@@ -388,11 +388,13 @@ app.get("/api/notes/:id", (req, res) => {
   if (!n || !visibleNote(req, n)) return fail(res, 404, "笔记不存在或不可见");
   ok(res, { note: noteJson(n) });
 });
+const countNoteImages = (content: string) => ((content || "").match(/!\[[^\]]*\]\([^)\s]+\)/g) || []).length;
 app.post("/api/notes", requireAuth, (req, res) => {
   const u = authedUser(req);
   const title = String(req.body?.title || "").trim().slice(0, 120);
   const content = String(req.body?.content || "");
   if (!content.trim() && !title) return fail(res, 400, "标题和正文至少填一项");
+  if (countNoteImages(content) > 9) return fail(res, 400, "每篇独白最多插入 9 张图片");
   const tags = Array.isArray(req.body?.tags) ? (req.body.tags as unknown[]).map((t) => String(t).trim().slice(0, 24)).filter(Boolean).slice(0, 10) : [];
   const now = Date.now();
   const info = db.prepare("INSERT INTO notes(user_id,title,content,tags,weather,location,visibility,pinned,archived,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)")
@@ -405,9 +407,11 @@ app.put("/api/notes/:id", requireAuth, (req, res) => {
   const u = authedUser(req);
   const n = db.prepare("SELECT * FROM notes WHERE id=?").get(Number(req.params.id)) as NoteRow | undefined;
   if (!n || n.user_id !== u.id) return fail(res, 404, "笔记不存在");
+  const newContent = String(req.body?.content ?? n.content);
+  if (countNoteImages(newContent) > 9) return fail(res, 400, "每篇独白最多插入 9 张图片");
   const tags = Array.isArray(req.body?.tags) ? (req.body.tags as unknown[]).map((t) => String(t).trim().slice(0, 24)).filter(Boolean).slice(0, 10) : JSON.parse(n.tags);
   db.prepare("UPDATE notes SET title=?,content=?,tags=?,weather=?,location=?,visibility=?,pinned=?,archived=?,updated_at=? WHERE id=?")
-    .run(String(req.body?.title ?? n.title).slice(0, 120), String(req.body?.content ?? n.content), JSON.stringify(tags),
+    .run(String(req.body?.title ?? n.title).slice(0, 120), newContent, JSON.stringify(tags),
       String(req.body?.weather ?? n.weather).slice(0, 30), String(req.body?.location ?? n.location).slice(0, 60),
       req.body?.visibility === "private" ? "private" : "public", req.body?.pinned ? 1 : 0, req.body?.archived ? 1 : 0, Date.now(), n.id);
   ok(res, { note: noteJson(db.prepare("SELECT * FROM notes WHERE id=?").get(n.id) as unknown as NoteRow) });

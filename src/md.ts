@@ -28,11 +28,26 @@ export function renderMarkdown(src: string): string {
   let i = 0;
   let listTag: string | null = null;
   const closeList = () => { if (listTag) { out.push(`</${listTag}>`); listTag = null; } };
+  // 独立图片段落归组：连续的「整行只有一张图」的段落（段间允许空行）合成一个九宫格容器；
+  // 混排在文字中间的图片不拆，仍按普通段落渲染。1 张 cols-1 大图，2–4 张 cols-2 两列，5–9 张 cols-3 三列。
+  const imgRun: string[] = [];
+  const flushImgs = () => {
+    if (!imgRun.length) return;
+    const cols = imgRun.length === 1 ? 1 : imgRun.length <= 4 ? 2 : 3;
+    out.push(`<div class="img-grid cols-${cols}">${imgRun.join("")}</div>`);
+    imgRun.length = 0;
+  };
   while (i < lines.length) {
     const line = lines[i];
+    const imgLine = line.trim().match(/^!\[([^\]]*)\]\(([^)\s]+)\)$/);
+    if (imgLine && safeUrl(imgLine[2])) {
+      closeList();
+      imgRun.push(`<img src="${imgLine[2]}" alt="${imgLine[1]}" loading="lazy"/>`);
+      i++; continue;
+    }
     const fence = line.match(/^```(\w*)\s*$/);
     if (fence) {
-      closeList();
+      closeList(); flushImgs();
       const buf: string[] = [];
       i++;
       while (i < lines.length && !/^```\s*$/.test(lines[i])) { buf.push(lines[i]); i++; }
@@ -41,11 +56,11 @@ export function renderMarkdown(src: string): string {
       continue;
     }
     const h = line.match(/^(#{1,6})\s+(.*)$/);
-    if (h) { closeList(); const lv = h[1].length; out.push(`<h${lv}>${inline(h[2])}</h${lv}>`); i++; continue; }
-    if (/^\s*(-{3,}|\*{3,})\s*$/.test(line)) { closeList(); out.push("<hr/>"); i++; continue; }
+    if (h) { closeList(); flushImgs(); const lv = h[1].length; out.push(`<h${lv}>${inline(h[2])}</h${lv}>`); i++; continue; }
+    if (/^\s*(-{3,}|\*{3,})\s*$/.test(line)) { closeList(); flushImgs(); out.push("<hr/>"); i++; continue; }
     const quote = line.match(/^&gt;\s?(.*)$/);
     if (quote) {
-      closeList();
+      closeList(); flushImgs();
       const buf: string[] = [];
       while (i < lines.length) {
         const m = lines[i].match(/^&gt;\s?(.*)$/);
@@ -58,17 +73,18 @@ export function renderMarkdown(src: string): string {
     const ul = line.match(/^\s*[-*]\s+(.*)$/);
     const ol = line.match(/^\s*\d+[.)]\s+(.*)$/);
     if (ul || ol) {
+      flushImgs();
       const tag = ul ? "ul" : "ol";
       if (listTag !== tag) { closeList(); listTag = tag; out.push(`<${tag}>`); }
       out.push(`<li>${inline((ul || ol)![1])}</li>`);
       i++; continue;
     }
     if (!line.trim()) { closeList(); i++; continue; }
-    closeList();
+    closeList(); flushImgs();
     out.push(`<p>${inline(line)}</p>`);
     i++;
   }
-  closeList();
+  closeList(); flushImgs();
   return out.join("\n");
 }
 
@@ -87,4 +103,21 @@ export function firstImage(content: string): string {
   if (!m) return "";
   const u = m[1];
   return /^(https?:\/\/|\/uploads\/)/i.test(u) ? u : "";
+}
+
+// 正文全部图片 URL（按出现顺序，仅 http(s) 与站内 /uploads/，与渲染口径一致）
+export function imagesOf(content: string): string[] {
+  const out: string[] = [];
+  const re = /!\[([^\]]*)\]\(([^)\s]+)\)/g;
+  let m: RegExpExecArray | null;
+  const src = content || "";
+  while ((m = re.exec(src))) {
+    if (/^(https?:\/\/|\/uploads\/)/i.test(m[2])) out.push(m[2]);
+  }
+  return out;
+}
+
+// 图片语法总数（上限校验用，与服务端同一正则口径）
+export function countImages(content: string): number {
+  return ((content || "").match(/!\[[^\]]*\]\([^)\s]+\)/g) || []).length;
 }
