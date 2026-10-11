@@ -292,9 +292,10 @@ function SmtpSettings() {
 }
 
 function GeoWeatherSettings() {
-  const [w, setW] = useState({ enabled: true, hasKey: false });
+  const [w, setW] = useState({ enabled: true, hasKey: false, hasHost: false });
   const [g, setG] = useState({ enabled: true, hasKey: false });
   const [wKey, setWKey] = useState("");
+  const [wHost, setWHost] = useState("");
   const [gKey, setGKey] = useState("");
   const [wMsg, setWMsg] = useState("");
   const [gMsg, setGMsg] = useState("");
@@ -305,7 +306,7 @@ function GeoWeatherSettings() {
   });
   const [folded, setFolded] = useState(true);
   useEffect(() => {
-    api.get<{ weather: { enabled: boolean; hasKey: boolean }; geo: { enabled: boolean; hasKey: boolean } }>("/api/admin/geo").then((d) => {
+    api.get<{ weather: { enabled: boolean; hasKey: boolean; hasHost: boolean }; geo: { enabled: boolean; hasKey: boolean } }>("/api/admin/geo").then((d) => {
       setW(d.weather); setG(d.geo);
       if (foldPref === undefined) setFolded(d.weather.hasKey || d.geo.hasKey);
     }).catch(() => undefined);
@@ -318,11 +319,18 @@ function GeoWeatherSettings() {
     try { localStorage.setItem("np-weather-fold", next ? "1" : "0"); } catch { /* ignore */ }
   };
   const status = (w.enabled && w.hasKey) || (g.enabled && g.hasKey) ? "已启用" : (w.hasKey || g.hasKey) ? "未启用" : "未配置";
-  const saveW = async (clear = false) => {
+  const saveW = async (clear: "key" | "host" | false = false) => {
     try {
-      const d = await api.put<{ weather: { hasKey: boolean } }>("/api/admin/geo", clear ? { weather: { enabled: w.enabled, clearKey: true } } : { weather: { enabled: w.enabled, key: wKey || undefined } });
-      setWKey(""); setW((s) => ({ ...s, hasKey: d.weather.hasKey }));
-      setWMsg(clear ? "和风 KEY 已清空，未配置时自动获取回退 Open-Meteo" : "天气设置已保存并即时生效");
+      const body = clear === "key"
+        ? { weather: { enabled: w.enabled, clearKey: true } }
+        : clear === "host"
+          ? { weather: { enabled: w.enabled, clearHost: true } }
+          : { weather: { enabled: w.enabled, key: wKey || undefined, host: wHost || undefined } };
+      const d = await api.put<{ weather: { hasKey: boolean; hasHost: boolean } }>("/api/admin/geo", body);
+      setWKey(""); setWHost(""); setW((s) => ({ ...s, hasKey: d.weather.hasKey, hasHost: d.weather.hasHost }));
+      setWMsg(clear === "key" ? "和风 KEY 已清空，未配置时自动获取回退 Open-Meteo"
+        : clear === "host" ? "和风 API Host 已清空，未配置时自动获取回退 Open-Meteo"
+        : "天气设置已保存并即时生效");
     } catch (e) { setWMsg((e as Error).message); }
   };
   const saveG = async (clear = false) => {
@@ -369,16 +377,18 @@ function GeoWeatherSettings() {
       <div className={`oauth-collapse${collapsed ? "" : " open"}`}>
         <div className="oauth-collapse-inner">
           <h4 style={{ margin: "6px 0 2px" }}>天气（和风天气）</h4>
-          <p className="muted tiny">编辑器「自动获取」的天气来源。配置后优先使用和风实况（观测数据），未配置或失败时静默回退 Open-Meteo。在 <a href="https://dev.qweather.com" target="_blank" rel="noreferrer">dev.qweather.com</a> 注册免费订阅后把 KEY 填到下面（只存加密值，永不回显）。</p>
+          <p className="muted tiny">编辑器「自动获取」的天气来源。配置后优先使用和风实况（观测数据），未配置或失败时静默回退 Open-Meteo。在 <a href="https://dev.qweather.com" target="_blank" rel="noreferrer">dev.qweather.com</a> 注册免费订阅后把 KEY 填到下面（只存加密值，永不回显）。和风新版要求使用专属 API Host：去 <a href="https://console.qweather.com" target="_blank" rel="noreferrer">console.qweather.com</a> → 设置/API 管理复制，只填主机名（如 abc123.def.qweatherapi.com），不要带 https://。</p>
           <div className="form">
             <label className="check"><input type="checkbox" checked={w.enabled} onChange={(e) => setW({ ...w, enabled: e.target.checked })} /> 启用和风天气实况</label>
             <label>QWeather API KEY<input type="password" value={wKey} placeholder={w.hasKey ? "已设置（留空不改）" : "未设置"} onChange={(e) => setWKey(e.target.value)} autoComplete="off" /></label>
+            <label>和风 API Host<input value={wHost} placeholder={w.hasHost ? "已设置（留空不改）" : "如 your-host.qweatherapi.com"} onChange={(e) => setWHost(e.target.value)} autoComplete="off" /></label>
           </div>
           {wMsg && <p className="ok-text">{wMsg}</p>}
           <div className="btn-row">
             <button className="btn btn-primary" onClick={() => void saveW(false)}>保存天气</button>
             <button className="btn btn-ghost" disabled={wTesting} onClick={testW}>{wTesting ? "测试中…" : "测试"}</button>
-            {w.hasKey && <button className="btn btn-danger btn-sm" onClick={() => void saveW(true)}>清空 KEY</button>}
+            {w.hasKey && <button className="btn btn-danger btn-sm" onClick={() => void saveW("key")}>清空 KEY</button>}
+            {w.hasHost && <button className="btn btn-ghost btn-sm" onClick={() => void saveW("host")}>清空 Host</button>}
           </div>
           <h4 style={{ margin: "14px 0 2px" }}>位置（腾讯位置服务）</h4>
           <p className="muted tiny">编辑器「自动获取」的位置来源。配置后优先使用腾讯逆地理（区县精度），未配置或失败时静默回退 BigDataCloud。在 <a href="https://lbs.qq.com" target="_blank" rel="noreferrer">lbs.qq.com</a> 申请 Key 后填到下面（只存加密值，永不回显）。</p>

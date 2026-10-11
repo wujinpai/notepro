@@ -81,3 +81,16 @@ export const maskEmail = (email: string | null): string => {
   const head = name.slice(0, Math.min(2, name.length));
   return `${head}${"*".repeat(Math.max(1, name.length - head.length))}@${domain}`;
 };
+
+// ---- 和风 API Host 归一化/校验：只填主机名（可带端口），防 SSRF/注入 ----
+// 合法 → 返回小写归一化主机名；非法 → null
+export function normalizeQweatherHost(input: string | null | undefined): string | null {
+  if (!input) return null;
+  let h = String(input).trim();
+  h = h.replace(/^https?:\/\//i, "").replace(/\/+$/, "");
+  if (!/^[A-Za-z0-9.-]{1,80}(?::\d{1,5})?$/.test(h)) return null;
+  const bare = h.split(":")[0];
+  if (!bare.includes(".")) return null; // 必须像个域名/IP，不接受裸词
+  if (/^[.-]|[.-]$/.test(bare) || bare.includes("..")) return null;
+  return h.toLowerCase();
+}

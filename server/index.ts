@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, readFileSync, unlinkSync, copyFileSync, writeFil
 import { join, extname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { db, getSetting, setSetting, DATA_DIR, DB_PATH } from "./db.js";
-import { hashPassword, verifyPassword, sha256, encryptSecret, decryptSecret, verifyPayload, signPayload, maskEmail, randomToken, parseTencentAddressComponent } from "./util.js";
+import { hashPassword, verifyPassword, sha256, encryptSecret, decryptSecret, verifyPayload, signPayload, maskEmail, randomToken, parseTencentAddressComponent, normalizeQweatherHost } from "./util.js";
 import { sendEmailCode, verifyEmailCode, createSliderChallenge, verifySlider, consumeTicket, getSmtpConfig, sendMail } from "./mail.js";
 import {
   getUserById, getUserByUsername, getUserByEmail, publicUser, createSession, setSessionCookie, clearSessionCookie,
@@ -785,7 +785,7 @@ app.post("/api/admin/smtp/test", requireAdmin, async (req, res) => {
 // ---- 天气与位置设置（和风天气 KEY + 腾讯位置服务 KEY，AES-256-GCM 加密存储，接口永不回显明文） ----
 app.get("/api/admin/geo", requireAdmin, (_req, res) => {
   ok(res, {
-    weather: { enabled: getSetting("weather_enabled") === "1", hasKey: !!getSetting("weather_qweather_key_enc") },
+    weather: { enabled: getSetting("weather_enabled") === "1", hasKey: !!getSetting("weather_qweather_key_enc"), hasHost: !!getSetting("weather_qweather_host_enc") },
     geo: { enabled: getSetting("geo_enabled") === "1", hasKey: !!getSetting("geo_qq_key_enc") },
   });
 });
@@ -795,6 +795,12 @@ app.put("/api/admin/geo", requireAdmin, (req, res) => {
     setSetting("weather_enabled", b.weather.enabled === false ? "0" : "1");
     if (b.weather.clearKey) setSetting("weather_qweather_key_enc", "");
     else if (b.weather.key) setSetting("weather_qweather_key_enc", encryptSecret(String(b.weather.key).trim().slice(0, 80)));
+    if (b.weather.clearHost) setSetting("weather_qweather_host_enc", "");
+    else if (b.weather.host) {
+      const hn = normalizeQweatherHost(String(b.weather.host));
+      if (!hn) return fail(res, 400, "API Host 格式无效：只填主机名（如 xxx.qweatherapi.com），不要带 https://，仅允许字母、数字、点、横线");
+      setSetting("weather_qweather_host_enc", encryptSecret(hn));
+    }
   }
   if (b.geo) {
     setSetting("geo_enabled", b.geo.enabled === false ? "0" : "1");
@@ -802,7 +808,7 @@ app.put("/api/admin/geo", requireAdmin, (req, res) => {
     else if (b.geo.key) setSetting("geo_qq_key_enc", encryptSecret(String(b.geo.key).trim().slice(0, 80)));
   }
   ok(res, {
-    weather: { hasKey: !!getSetting("weather_qweather_key_enc") },
+    weather: { hasKey: !!getSetting("weather_qweather_key_enc"), hasHost: !!getSetting("weather_qweather_host_enc") },
     geo: { hasKey: !!getSetting("geo_qq_key_enc") },
   });
 });
@@ -812,9 +818,12 @@ async function qweatherNow(lat: number, lon: number): Promise<{ desc: string; te
   const key = decryptSecret(getSetting("weather_qweather_key_enc"));
   if (!key) return { qerror: "未配置 API KEY" };
   if (getSetting("weather_enabled") !== "1") return { qerror: "天气服务未启用" };
+  // 和风 API Host 必须走管理后台配置：为空即视为未配置（代码里不写死任何 host），直接回退
+  const host = normalizeQweatherHost(decryptSecret(getSetting("weather_qweather_host_enc")));
+  if (!host) return { qerror: "未配置 API Host（请在管理后台「天气与位置」填写和风专属 API Host）" };
   let status = 0, d: any = null;
   try {
-    const r = await fetch(`https://devapi.qweather.com/v7/weather/now?location=${lon.toFixed(2)},${lat.toFixed(2)}&key=${encodeURIComponent(key)}`, { signal: AbortSignal.timeout(8000) });
+    const r = await fetch(`https://${host}/v7/weather/now?location=${lon.toFixed(2)},${lat.toFixed(2)}&key=${encodeURIComponent(key)}`, { signal: AbortSignal.timeout(8000) });
     status = r.status;
     const text = await r.text();
     try { d = text.trim() ? JSON.parse(text) : null; } catch { d = null; }
@@ -827,6 +836,10 @@ async function qweatherNow(lat: number, lon: number): Promise<{ desc: string; te
   }
   // 和风异常形态：HTTP 4xx/5xx + {error:{title,detail}}，或 200 + {code:"4xx"}
   const ej = d?.error;
+  const invalidHost = /invalid host/i.test(`${ej?.title || ""} ${ej?.detail || ""}`);
+  if (status === 403 || ej?.status === 403 || invalidHost) {
+    return { qerror: "和风返回 403（Invalid Host）：请检查 API Host 是否为控制台（console.qweather.com）专属域名，如 xxx.qweatherapi.com" };
+  }
   if (ej) return { qerror: `和风返回 ${ej.status ?? status}（${ej.title || ej.detail || "未知错误"}）` };
   const codeMsg: Record<string, string> = {
     "400": "请求错误", "401": "key 无效或无权限", "402": "超过访问次数", "403": "无访问权限",
