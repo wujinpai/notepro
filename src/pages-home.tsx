@@ -280,7 +280,7 @@ export function NoteDetail({ noteId, user, onBack, onEdit, onDeleted, focusComme
   const [lb, setLb] = useState<{ images: string[]; index: number } | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
   useEffect(() => {
-    api.get<{ note: NoteInfo }>(`/api/notes/${noteId}`).then((d) => setNote(d.note)).catch((e) => setError((e as Error).message));
+    api.get<{ note: NoteInfo }>(`/api/notes/${noteId}?view=1`).then((d) => setNote(d.note)).catch((e) => setError((e as Error).message));
   }, [noteId]);
   if (error) return <div className="empty">{error}。<button className="text-btn" onClick={onBack}>返回</button></div>;
   if (!note) return <div className="empty">加载中…</div>;

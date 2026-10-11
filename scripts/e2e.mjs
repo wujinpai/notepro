@@ -394,7 +394,80 @@ async function main() {
   const bindCbUrl = bindAuthz.headers.get("location") || "";
   // QQ openid 已被 qqUser 占用，alice 绑定同一 QQ 应报错友好
   const bindCb = await alice.req("GET", bindCbUrl.replace(BASE, ""), undefined, {});
-  check("重复绑定他人第三方账号被友好拦截", (bindCb.headers.get("location") || "").includes("oauth_msg"), bindCb.headers.get("location") || "");
+  check("重复绑定他人第三方账号被友好拦截", bindCb.status === 400 && bindCb.text.includes("已经绑定了其他用户"), `${bindCb.status}`);
+
+  // OAuth 真实环境错误：平台直接返回 error 参数（此前被吞成含糊提示）
+  const errCb = await guest.get("/api/auth/oauth/github/callback?error=redirect_uri_mismatch&error_description=x");
+  check("redirect_uri_mismatch 给出中文指引页",
+    errCb.status === 400 && errCb.text.includes("回调地址不匹配") && errCb.text.includes("/api/auth/oauth/github/callback"));
+  const denied = await guest.get("/api/auth/oauth/github/callback?error=access_denied");
+  check("access_denied 给出中文指引页", denied.status === 400 && denied.text.includes("已取消授权"));
+  const badState = await guest.get("/api/auth/oauth/github/callback?state=invalid");
+  check("state 丢失给出中文指引页", badState.status === 400 && badState.text.includes("授权链接无效"));
+  const qqErr = await guest.get("/api/auth/oauth/qq/callback?error=invalid_client&error_description=client%20id%20is%20illegal");
+  check("QQ invalid_client 给出 App ID 指引", qqErr.status === 400 && qqErr.text.includes("纯数字 App ID"));
+
+  console.log("== sitemap、公开只读页、浏览计数 ==");
+  // 注意：前面的下架测试已把 noteId 改为私密，这里新建一篇公开笔记做断言
+  const pubNote = await alice.post("/api/notes", { title: "公开计数帖", content: "公开内容", tags: [], visibility: "public" });
+  const pubId = pubNote.json.note.id;
+  const arch = await alice.post("/api/notes", { title: "归档帖", content: "归档内容", tags: [], visibility: "public" });
+  await alice.put(`/api/notes/${arch.json.note.id}`, { archived: true });
+  const sm = await guest.get("/sitemap.xml");
+  check("sitemap 含公开独白", sm.text.includes(`/n/${pubId}`) && sm.text.includes("<lastmod>"), sm.text.slice(0, 120));
+  check("sitemap 不含私密/归档", !sm.text.includes(`/n/${priv.json.note.id}`) && !sm.text.includes(`/n/${arch.json.note.id}`));
+  const robots = await guest.get("/robots.txt");
+  check("robots 指向 sitemap", robots.text.includes("Sitemap:") && robots.text.includes("/sitemap.xml"), robots.text);
+  const pub1 = await guest.get(`/api/public/notes/${pubId}`);
+  check("公开只读接口可达", pub1.status === 200 && pub1.json.note.id === pubId);
+  check("私密只读接口 404", (await guest.get(`/api/public/notes/${priv.json.note.id}`)).status === 404);
+  const v0 = (await alice.get("/api/admin/notes")).json.notes.find((n) => n.id === pubId).viewCount;
+  await guest.get(`/api/notes/${pubId}?view=1`);
+  await guest.get(`/api/notes/${pubId}?view=1`);
+  await guest.get(`/api/notes/${pubId}`); // 不带 view 不计数
+  const shareInfo = await alice.get(`/api/notes/${pubId}/share`);
+  await guest.get(`/api/share/${shareInfo.json.token}?view=1`);
+  await guest.get(`/api/public/notes/${pubId}?view=1`);
+  const v1 = (await alice.get("/api/admin/notes")).json.notes.find((n) => n.id === pubId).viewCount;
+  check("浏览计数 +4（详情×2+分享+公开页）", v1 - v0 === 4, `${v0}→${v1}`);
+  const ov2 = (await alice.get("/api/admin/overview")).json;
+  check("概览总浏览/今日浏览可见", ov2.totalViews >= 4 && ov2.todayViews >= 4, `total=${ov2.totalViews} today=${ov2.todayViews}`);
+
+  console.log("== 数据备份：导出/一次性 token/恢复校验 ==");
+  const bk = await alice.post("/api/admin/backup/token", {});
+  check("备份 token 下发", bk.status === 200 && !!bk.json?.token);
+  const dl = await alice.get(`/api/admin/backup/download?token=${encodeURIComponent(bk.json.token)}`);
+  check("导出为 SQLite 文件", dl.status === 200 && dl.text.startsWith("SQLite format 3"));
+  check("token 一次性", (await alice.get(`/api/admin/backup/download?token=${encodeURIComponent(bk.json.token)}`)).status === 403);
+  check("坏 token 拒绝", (await alice.get("/api/admin/backup/download?token=nope")).status === 403);
+  const bkBadFd = new FormData();
+  bkBadFd.append("file", new Blob(["hello"]), "x.db");
+  check("非 SQLite 恢复被拒", (await alice.req("POST", "/api/admin/backup/restore", bkBadFd)).status === 400);
+  {
+    const { DatabaseSync } = await import("node:sqlite");
+    const { writeFileSync, rmSync } = await import("node:fs");
+    rmSync("/tmp/notepro-fake-backup.db", { force: true });
+    const tdb = new DatabaseSync("/tmp/notepro-fake-backup.db");
+    tdb.exec("CREATE TABLE foo(id INTEGER)");
+    tdb.close();
+    const buf = (await import("node:fs")).readFileSync("/tmp/notepro-fake-backup.db");
+    const fd2 = new FormData();
+    fd2.append("file", new Blob([buf]), "fake.db");
+    const rs = await alice.req("POST", "/api/admin/backup/restore", fd2);
+    check("缺表 SQLite 恢复被拒", rs.status === 400 && /缺少数据表|校验失败/.test(rs.json?.error || ""));
+  }
+
+  console.log("== 主题强调色 ==");
+  const siteCur = (await alice.get("/api/admin/site")).json;
+  await alice.put("/api/admin/site", { ...siteCur, accent: "#d6336c" });
+  check("强调色保存与读取", (await alice.get("/api/admin/site")).json.accent === "#d6336c");
+  await alice.put("/api/admin/site", { ...siteCur, accent: "red" });
+  check("非法强调色被清空", (await alice.get("/api/admin/site")).json.accent === "");
+  await alice.put("/api/admin/site", { ...siteCur, accent: "#d6336c" });
+  const homeHtml = await guest.get("/");
+  check("首屏注入强调色样式", homeHtml.text.includes('id="np-accent"') && homeHtml.text.includes("--accent:#d6336c"));
+  await alice.put("/api/admin/site", { ...siteCur, accent: "" });
+  check("恢复默认后无注入", !(await guest.get("/")).text.includes('id="np-accent"'));
 
   console.log(`\nE2E 结果：${passed} 通过，${failed} 失败`);
   if (failures.length) console.log("失败项：" + failures.join("；"));

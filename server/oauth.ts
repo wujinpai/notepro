@@ -74,7 +74,15 @@ export async function exchangeProfile(p: Provider, cfg: ProviderConfig, code: st
       const m = tokenText.match(/access_token=([^&]+)/);
       access = m ? decodeURIComponent(m[1]) : "";
     }
-    if (!access) throw new Error("GitHub 授权失败：未取得 access_token");
+    if (!access) {
+      // GitHub 失败时会返回 {"error":"...","error_description":"..."}，带出来方便定位
+      let detail = "";
+      try {
+        const j = JSON.parse(tokenText) as { error?: string; error_description?: string };
+        if (j.error) detail = `（${j.error}${j.error_description ? "：" + j.error_description : ""}）`;
+      } catch { /* ignore */ }
+      throw new Error(`GitHub 授权失败：未取得 access_token${detail.slice(0, 200)}`);
+    }
     const userText = await httpText(`${api}/user`, { headers: { Authorization: `Bearer ${access}`, "User-Agent": "NotePro" } });
     const gu = JSON.parse(userText) as { id: number; login: string; name?: string; avatar_url?: string; email?: string };
     return { openid: String(gu.id), unionid: "", nickname: gu.name || gu.login || "", avatar: gu.avatar_url || "", email: gu.email || "" };

@@ -239,7 +239,7 @@ export function AuthDialog({ site, onClose, onAuthed }: { site: SiteInfo; onClos
   const oauthName = (p: string) => (p === "github" ? "GitHub" : p === "qq" ? "QQ" : p);
   return (
     <Modal title={mode === "login" ? "登录" : mode === "register" ? "注册" : "忘记密码"} onClose={onClose}>
-      <div className="seg" role="tablist">
+      <div className="seg seg-fill" role="tablist">
         <button className={mode === "login" ? "on" : ""} onClick={() => { setMode("login"); freshSlider(); setError(""); }}>登录</button>
         {site.registerOpen && <button className={mode === "register" ? "on" : ""} onClick={() => { setMode("register"); freshSlider(); setError(""); }}>注册</button>}
         <button className={mode === "reset" ? "on" : ""} onClick={() => { setMode("reset"); freshSlider(); setError(""); }}>忘记密码</button>

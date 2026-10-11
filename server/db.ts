@@ -2,10 +2,11 @@ import { DatabaseSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 
-const DATA_DIR = process.env.DATA_DIR || join(process.cwd(), "data");
+export const DATA_DIR = process.env.DATA_DIR || join(process.cwd(), "data");
 mkdirSync(DATA_DIR, { recursive: true });
+export const DB_PATH = join(DATA_DIR, "notepro.db");
 
-export const db = new DatabaseSync(join(DATA_DIR, "notepro.db"));
+export const db = new DatabaseSync(DB_PATH);
 db.exec("PRAGMA journal_mode = WAL;");
 
 db.exec(`
@@ -119,6 +120,17 @@ CREATE TABLE IF NOT EXISTS comments (
   created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_comments_note ON comments(note_id, created_at);
+`);
+
+// 迁移：notes 增加 view_count（详情真实渲染计数）；新增 site_views 按天站点访问计数
+if (!noteCols.some((c) => c.name === "view_count")) {
+  db.exec("ALTER TABLE notes ADD COLUMN view_count INTEGER NOT NULL DEFAULT 0");
+}
+db.exec(`
+CREATE TABLE IF NOT EXISTS site_views (
+  day TEXT PRIMARY KEY,
+  views INTEGER NOT NULL DEFAULT 0
+);
 `);
 
 export function getSetting(key: string, def = ""): string {

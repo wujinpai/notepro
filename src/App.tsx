@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, bootSite, cacheSite, syncFavicon, DEFAULT_ICON, type NoteInfo, type SiteInfo, type UserInfo } from "./api";
+import { api, bootSite, cacheSite, syncFavicon, applyAccent, DEFAULT_ICON, type NoteInfo, type SiteInfo, type UserInfo } from "./api";
 import { AuthDialog, Avatar, MoonIcon, PenIcon, SearchIcon, SunIcon } from "./components";
 import { HomePage, NoteDetail, SiteDrawer } from "./pages-home";
 import { SharePage } from "./pages-share";
@@ -42,7 +42,11 @@ function MenuIcon() {
 export default function App() {
   const { theme, toggle } = useTheme();
   // 初始站点信息来自服务端注入/本地缓存，未就绪时 name 留空：品牌区只渲染中性占位，不闪默认「己素」与蓝 N
-  const [site, setSite] = useState<SiteInfo>(() => bootSite() ?? { name: "", subtitle: "", description: "", keywords: "", footer: "", icp: "", logo: "", registerOpen: true, oauthProviders: [] });
+  const [site, setSite] = useState<SiteInfo>(() => {
+    const s = bootSite() ?? { name: "", subtitle: "", description: "", keywords: "", footer: "", icp: "", logo: "", accent: "", registerOpen: true, oauthProviders: [] };
+    if (s.accent) applyAccent(s.accent);
+    return s;
+  });
   const [user, setUser] = useState<UserInfo | null>(null);
   const [authOpen, setAuthOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -84,13 +88,14 @@ export default function App() {
     api.get<SiteInfo>("/api/site").then((d) => {
       setSite(d);
       cacheSite(d);
+      if (d.accent) applyAccent(d.accent);
       syncFavicon(d.logo || DEFAULT_ICON);
       document.title = d.subtitle ? `${d.name} - ${d.subtitle}` : d.name;
       const meta = document.querySelector('meta[name="description"]');
       if (meta && d.description) meta.setAttribute("content", d.description);
     }).catch(() => {
       // 接口异常时才落默认品牌（正常路径首帧已由注入/缓存给出真值，不会闪）
-      setSite((s) => (s.name ? s : { name: "己素", subtitle: "Jisu", description: "", keywords: "", footer: "", icp: "", logo: "", registerOpen: true, oauthProviders: [] }));
+      setSite((s) => (s.name ? s : { name: "己素", subtitle: "Jisu", description: "", keywords: "", footer: "", icp: "", logo: "", accent: "", registerOpen: true, oauthProviders: [] }));
     });
     refreshUser();
     // OAuth 回调带回的消息/成功标记
@@ -190,6 +195,9 @@ export default function App() {
   // 独立分享页是真实路径 /s/<token>，不走哈希路由与应用顶栏
   const shareMatch = location.pathname.match(/^\/s\/([A-Za-z0-9_-]{8,})$/);
   if (shareMatch) return <SharePage token={shareMatch[1]} />;
+  // 公开独白只读页是真实路径 /n/<id>（sitemap 可爬；私密/归档/删除的 404），与分享页同渲染口径
+  const pubMatch = location.pathname.match(/^\/n\/(\d+)$/);
+  if (pubMatch) return <SharePage noteId={Number(pubMatch[1])} />;
 
   return (
     <div className="app">

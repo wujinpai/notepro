@@ -168,6 +168,23 @@ async function main() {
   await page.goto(BASE + "/", { waitUntil: "networkidle" });
   await page.getByRole("button", { name: "登录", exact: true }).click();
   await shot(page, "login-dialog", 1366);
+  const authSeg = await page.evaluate(() => {
+    const seg = document.querySelector(".modal-panel .seg-fill");
+    if (!seg) return null;
+    const btns = [...seg.querySelectorAll("button")].map((b) => b.getBoundingClientRect().width);
+    const segW = seg.getBoundingClientRect().width;
+    return { btns, segW, labels: [...seg.querySelectorAll("button")].map((b) => b.textContent.trim()) };
+  });
+  expect("登录弹窗：三段等宽且铺满整行",
+    !!authSeg && authSeg.labels.join("/") === "登录/注册/忘记密码" &&
+    Math.max(...authSeg.btns) - Math.min(...authSeg.btns) < 1.5 &&
+    Math.abs(authSeg.btns.reduce((a, b) => a + b, 0) - authSeg.segW) <= 2.5,
+    JSON.stringify(authSeg));
+  const sliderGeo = await page.evaluate(() => {
+    const w = document.querySelector(".modal-panel .slider-wrap")?.getBoundingClientRect();
+    return w ? { w: w.width } : null;
+  });
+  expect("登录弹窗：滑块拼图收窄居中（≤240px）", !!sliderGeo && sliderGeo.w <= 240 && sliderGeo.w > 150, JSON.stringify(sliderGeo));
   await ctx.close();
 
   // ---------- 桌面 1366 管理员：菜单 / 用户中心后台标签 / 我的独白 / 编辑器 ----------
@@ -193,7 +210,7 @@ async function main() {
   const segTexts = (await page.locator(".me-main .seg button").allTextContents()).map((t) => t.trim());
   expect("桌面管理员：后台六个子标签齐全", ["概览", "用户管理", "内容管理", "站点设置", "邮箱设置", "第三方登录"].every((x) => segTexts.some((t) => t === x)), segTexts.join("/"));
   const statCount = await page.locator(".me-main .stat-card").count();
-  expect("桌面管理员：后台概览统计卡 6 张（功能完整）", statCount === 6, `got ${statCount}`);
+  expect("桌面管理员：后台概览统计卡 8 张（功能完整，含总浏览/今日浏览）", statCount === 8, `got ${statCount}`);
 
   // 后台按钮行（第三方登录页）：桌面同行等高
   await page.locator(".me-main .seg button", { hasText: "第三方登录" }).click();
@@ -275,6 +292,81 @@ async function main() {
   await page.locator(".color-dot").nth(5).click();
   const emptyWrap = await ta.inputValue();
   expect("编辑器：无选区插入空包裹", emptyWrap.includes("[color=#1971c2][/color]"), emptyWrap);
+  await ctx.close();
+
+  // ---------- 本轮五项：OAuth 错误页 / /n 只读页 / 强调色 / 备份面板 / 浏览计数 ----------
+  // 造一篇公开笔记与一篇私密笔记
+  const rnPub = await admin.req("POST", "/api/notes", { title: "只读页检查帖", content: "公开正文内容", tags: [], visibility: "public" });
+  const rnPriv = await admin.req("POST", "/api/notes", { title: "私密帖", content: "不公开", tags: [], visibility: "private" });
+  const rnPubId = rnPub.json.note.id, rnPrivId = rnPriv.json.note.id;
+
+  ctx = await browser.newContext({ viewport: { width: 1366, height: 900 } });
+  page = await ctx.newPage();
+  // 1) OAuth 错误页：中文指引而非白屏
+  await page.goto(BASE + "/api/auth/oauth/github/callback?error=redirect_uri_mismatch&error_description=x", { waitUntil: "commit" });
+  const oauthErr = await page.evaluate(() => document.body.innerText);
+  expect("OAuth 错误页：redirect_uri_mismatch 有中文指引", oauthErr.includes("回调地址不匹配") && oauthErr.includes("/api/auth/oauth/github/callback") && oauthErr.length > 100, oauthErr.slice(0, 80));
+  await page.goto(BASE + "/api/auth/oauth/qq/callback?error=invalid_client&error_description=client%20id%20is%20illegal", { waitUntil: "commit" });
+  const qqErr = await page.evaluate(() => document.body.innerText);
+  expect("OAuth 错误页：QQ invalid_client 指引 App ID", qqErr.includes("纯数字 App ID"), qqErr.slice(0, 80));
+  // 2) /n/<id> 真实路径只读页
+  await page.goto(BASE + `/n/${rnPubId}`, { waitUntil: "networkidle" });
+  await shot(page, "public-note", 1366);
+  const pubPage = await page.evaluate(() => ({
+    title: document.querySelector(".share-card h1")?.textContent || "",
+    body: document.querySelector(".share-card .markdown")?.textContent || "",
+  }));
+  expect("/n/<id>：公开独白正常渲染", pubPage.title.includes("只读页检查帖") && pubPage.body.includes("公开正文内容"), JSON.stringify(pubPage));
+  await page.goto(BASE + `/n/${rnPrivId}`, { waitUntil: "networkidle" });
+  const privPage = await page.evaluate(() => document.body.innerText);
+  expect("/n/<id>：私密笔记 404 友好页", privPage.includes("不存在或已失效"), privPage.slice(0, 60));
+  // 3) 强调色：后台改色后按钮真实变色
+  const siteCfg2 = (await admin.req("GET", "/api/admin/site")).json;
+  await admin.req("PUT", "/api/admin/site", { ...siteCfg2, accent: "#d6336c" });
+  await page.goto(BASE + "/", { waitUntil: "networkidle" });
+  const accentBg = await page.evaluate(() => {
+    const b = document.querySelector(".top-actions .btn-primary") || document.querySelector(".btn-primary");
+    return b ? getComputedStyle(b).backgroundColor : "";
+  });
+  expect("强调色：主按钮真实变色", accentBg === "rgb(214, 51, 108)", accentBg);
+  const accentStyleEl = await page.evaluate(() => document.getElementById("np-accent")?.textContent || "");
+  expect("强调色：明暗两套变量齐全", accentStyleEl.includes('[data-theme="dark"]') && accentStyleEl.includes("--on-accent"), accentStyleEl.slice(0, 120));
+  await admin.req("PUT", "/api/admin/site", { ...siteCfg2, accent: "" });
+  await ctx.close();
+
+  // 4+5) 后台：备份面板、QQ 指引文案、浏览数列、总浏览卡片（管理员）
+  ctx = await browser.newContext({ viewport: { width: 1366, height: 900 } });
+  await ctx.addCookies([{ name: "np_session", value: adminToken, domain: "127.0.0.1", path: "/" }]);
+  page = await ctx.newPage();
+  await page.goto(BASE + "/#admin", { waitUntil: "networkidle" });
+  await page.locator(".me-main .stat-card").first().waitFor({ timeout: 5000 }).catch(() => {});
+  const backupPanel = await page.evaluate(() => {
+    const h = [...document.querySelectorAll(".me-main .panel h3")].find((e) => e.textContent.includes("数据备份"));
+    const p = h?.closest(".panel");
+    return { found: !!h, btns: p ? [...p.querySelectorAll("button")].map((b) => b.textContent.trim()) : [] };
+  });
+  expect("后台概览：数据备份面板与导出/上传按钮", backupPanel.found && backupPanel.btns.some((t) => t.includes("导出数据库备份")) && backupPanel.btns.some((t) => t.includes("上传备份恢复")), JSON.stringify(backupPanel.btns));
+  const viewCards = await page.evaluate(() => [...document.querySelectorAll(".me-main .stat-card span")].map((s) => s.textContent));
+  expect("后台概览：总浏览/今日浏览卡片", viewCards.some((t) => t.includes("总浏览")) && viewCards.some((t) => t.includes("今日浏览")), viewCards.join("/"));
+  // 内容管理子标签 → 浏览数列
+  await page.locator(".me-nav .me-tabs > button", { hasText: "管理后台" }).click();
+  await page.waitForTimeout(400);
+  await page.locator(".seg-scroll button, .seg button", { hasText: "内容管理" }).first().click();
+  await page.waitForTimeout(600);
+  const notesTable = await page.evaluate(() => {
+    const ths = [...document.querySelectorAll(".me-main table thead th")].map((t) => t.textContent.trim());
+    const rows = [...document.querySelectorAll(".me-main table tbody tr")];
+    const target = rows.find((r) => r.textContent.includes("只读页检查帖"));
+    const idx = ths.indexOf("浏览数");
+    return { ths, count: target && idx >= 0 ? target.querySelectorAll("td")[idx]?.textContent.trim() : null };
+  });
+  expect("后台内容管理：浏览数列且计数≥1", notesTable.ths.includes("浏览数") && Number(notesTable.count) >= 1, JSON.stringify(notesTable));
+  // 第三方登录子标签 → QQ 指引文案
+  await page.locator(".seg-scroll button, .seg button", { hasText: "第三方登录" }).first().click();
+  await page.waitForTimeout(600);
+  const qqPanel = await page.evaluate(() => document.querySelector(".me-main")?.textContent || "");
+  expect("后台第三方登录：QQ 面板有 100008、网站回调域与调试QQ号指引", qqPanel.includes("100008") && qqPanel.includes("网站回调域") && qqPanel.includes("调试QQ号"), qqPanel.slice(0, 120));
+  await shot(page, "admin-backup", 1366);
   await ctx.close();
 
   // ---------- 桌面 1366 普通用户：无后台标签，#admin 不死链 ----------

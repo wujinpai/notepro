@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api, fmtTime, type NoteInfo, type UserInfo } from "./api";
 import { Avatar } from "./components";
 
@@ -48,15 +48,16 @@ export function AdminPage({ user, embedded = false }: { user: UserInfo; embedded
 }
 
 function Overview() {
-  const [data, setData] = useState<{ users: number; notes: number; oauthBindings: number; todayUsers: number; todayNotes: number; todayVisits: number; recentUsers: UserInfo[] } | null>(null);
+  const [data, setData] = useState<{ users: number; notes: number; oauthBindings: number; todayUsers: number; todayNotes: number; todayVisits: number; totalViews: number; todayViews: number; recentUsers: UserInfo[] } | null>(null);
   useEffect(() => { api.get("/api/admin/overview").then((d) => setData(d as typeof data)).catch(() => undefined); }, []);
   if (!data) return <div className="panel">加载中…</div>;
-  const cards: [string, number][] = [["用户总数", data.users], ["笔记总数", data.notes], ["第三方绑定", data.oauthBindings], ["今日新增用户", data.todayUsers], ["今日新增笔记", data.todayNotes], ["今日访问", data.todayVisits]];
+  const cards: [string, number][] = [["用户总数", data.users], ["笔记总数", data.notes], ["第三方绑定", data.oauthBindings], ["今日新增用户", data.todayUsers], ["今日新增笔记", data.todayNotes], ["今日访问", data.todayVisits], ["总浏览", data.totalViews], ["今日浏览", data.todayViews]];
   return (
     <div className="stack">
       <div className="stat-grid">
         {cards.map(([label, v]) => <div key={label} className="stat-card"><strong>{v}</strong><span>{label}</span></div>)}
       </div>
+      <BackupPanel />
       <div className="panel">
         <h3>最近注册用户</h3>
         {data.recentUsers.map((u) => (
@@ -66,6 +67,46 @@ function Overview() {
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+function BackupPanel() {
+  const [msg, setMsg] = useState("");
+  const [file, setFile] = useState<File | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const doExport = async () => {
+    try {
+      const d = await api.post<{ token: string }>("/api/admin/backup/token", {});
+      window.location.href = `/api/admin/backup/download?token=${encodeURIComponent(d.token)}`;
+    } catch (e) { setMsg((e as Error).message); }
+  };
+  const doRestore = async () => {
+    if (!file) return;
+    if (!confirm("确定用该备份文件恢复数据库吗？恢复前当前数据库会自动备份到 data/backups（保留最近 5 份）。恢复后必须重启容器生效。")) return;
+    try {
+      const r = (await api.upload("/api/admin/backup/restore", file)) as unknown as { message?: string };
+      setMsg(r.message || "备份已恢复，请重启容器生效");
+      setFile(null);
+    } catch (e) { setMsg((e as Error).message); }
+  };
+  return (
+    <div className="panel">
+      <h3>数据备份</h3>
+      <p className="muted tiny">备份为 SQLite 数据库文件（.db），存放在容器 data 卷。上传恢复会替换当前数据库：恢复前自动把当前库备份到 data/backups，上传后必须重启容器生效。</p>
+      <div className="btn-row">
+        <button className="btn btn-primary" onClick={() => void doExport()}>导出数据库备份</button>
+        <button className="btn btn-ghost" onClick={() => fileRef.current?.click()}>上传备份恢复</button>
+        <input ref={fileRef} type="file" accept=".db" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) setFile(f); e.target.value = ""; }} />
+      </div>
+      {file && (
+        <p className="row-gap" style={{ marginTop: 10 }}>
+          <span className="muted tiny">已选择：{file.name}（{(file.size / 1024 / 1024).toFixed(2)} MB）</span>
+          <button className="btn btn-danger btn-sm" onClick={() => void doRestore()}>确认恢复</button>
+          <button className="btn btn-ghost btn-sm" onClick={() => setFile(null)}>取消</button>
+        </p>
+      )}
+      {msg && <p className="ok-text">{msg}</p>}
     </div>
   );
 }
@@ -128,13 +169,14 @@ function NotesAdmin() {
       <h3>内容管理</h3>
       <div className="table-wrap">
         <table>
-          <thead><tr><th>标题</th><th>作者</th><th>可见性</th><th>时间</th><th>操作</th></tr></thead>
+          <thead><tr><th>标题</th><th>作者</th><th>可见性</th><th>浏览数</th><th>时间</th><th>操作</th></tr></thead>
           <tbody>
             {notes.map((n) => (
               <tr key={n.id}>
                 <td>{n.title || n.content.slice(0, 30)}</td>
                 <td>{n.author?.nickname}</td>
                 <td>{n.archived ? "归档" : n.visibility === "private" ? "私密" : "公开"}</td>
+                <td>{n.viewCount}</td>
                 <td>{fmtTime(n.createdAt)}</td>
                 <td>
                   <div className="row-gap">
@@ -151,8 +193,10 @@ function NotesAdmin() {
   );
 }
 
+const ACCENT_PRESETS = ["#1a73e8", "#d6336c", "#e03131", "#e8590c", "#f08c00", "#2f9e44", "#1098ad", "#7048e8"];
+
 function SiteSettings() {
-  const [f, setF] = useState({ name: "", subtitle: "", description: "", keywords: "", footer: "", icp: "", logo: "", url: "", registerOpen: true, oauthShowLogin: true });
+  const [f, setF] = useState({ name: "", subtitle: "", description: "", keywords: "", footer: "", icp: "", logo: "", url: "", accent: "", registerOpen: true, oauthShowLogin: true });
   const [msg, setMsg] = useState("");
   useEffect(() => { api.get<typeof f>("/api/admin/site").then(setF).catch(() => undefined); }, []);
   const save = async () => {
@@ -173,6 +217,18 @@ function SiteSettings() {
         <label>SEO 关键词<input value={f.keywords} onChange={(e) => setF({ ...f, keywords: e.target.value })} /></label>
         <label>页脚文案<input value={f.footer} onChange={(e) => setF({ ...f, footer: e.target.value })} /></label>
         <label>ICP 备案号（页脚固定链接到工信部备案系统，留空则不显示）<input value={f.icp} placeholder="黔ICP备2026016351号-1" onChange={(e) => setF({ ...f, icp: e.target.value })} /></label>
+        <label>主题强调色（按钮、选中标签、链接等，留空为默认蓝色）
+          <span className="row-gap" style={{ flexWrap: "wrap" }}>
+            {ACCENT_PRESETS.map((c) => (
+              <button key={c} type="button" aria-label={`强调色 ${c}`} title={c}
+                onClick={() => setF({ ...f, accent: f.accent.toLowerCase() === c ? "" : c })}
+                style={{ width: 30, height: 30, borderRadius: 7, background: c, border: f.accent.toLowerCase() === c ? "2px solid var(--text)" : "1px solid var(--border)", cursor: "pointer", padding: 0 }} />
+            ))}
+            <input type="color" aria-label="自定义强调色" title="自定义强调色" value={/^#[0-9a-fA-F]{6}$/.test(f.accent) ? f.accent : "#1a73e8"}
+              onChange={(e) => setF({ ...f, accent: e.target.value })} style={{ width: 34, height: 30, padding: 2, borderRadius: 7, border: "1px solid var(--border)", background: "var(--card)", cursor: "pointer" }} />
+            {f.accent && <button type="button" className="btn btn-ghost btn-sm" onClick={() => setF({ ...f, accent: "" })}>恢复默认</button>}
+          </span>
+        </label>
         <label className="check"><input type="checkbox" checked={f.registerOpen} onChange={(e) => setF({ ...f, registerOpen: e.target.checked })} /> 开放注册</label>
         <label className="check"><input type="checkbox" checked={f.oauthShowLogin} onChange={(e) => setF({ ...f, oauthShowLogin: e.target.checked })} /> 登录弹窗显示第三方登录入口</label>
         <label>站点 Logo
@@ -257,6 +313,14 @@ function OauthSettings() {
     github: { label: "GitHub", idLabel: "Client ID", secretLabel: "Client Secret", where: "GitHub → Settings → Developer settings → OAuth Apps" },
     qq: { label: "QQ", idLabel: "App ID", secretLabel: "App Key", where: "QQ 互联 connect.qq.com → 应用管理" },
   };
+  const copyCallback = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setMsg("回调地址已复制");
+    } catch {
+      setMsg("复制失败，请手动选中复制");
+    }
+  };
   return (
     <div className="stack">
       {Object.entries(meta).map(([p, m]) => {
@@ -264,12 +328,29 @@ function OauthSettings() {
         return (
           <div key={p} className="panel">
             <h3>{m.label} 登录</h3>
-            <p className="muted tiny">在 {m.where} 创建应用，把下方回调地址填到开放平台，再把 {m.idLabel} 与{m.secretLabel}填回来。{m.label === "QQ" ? "QQ 还需在平台填写网站回调域。" : ""}</p>
+            {p === "github" ? (
+              <p className="muted tiny">在 {m.where} 创建 OAuth App，把下方回调地址填到应用的 Authorization callback URL，再把 {m.idLabel} 与{m.secretLabel}填回来。</p>
+            ) : (
+              <div className="muted tiny" style={{ lineHeight: 1.9 }}>
+                <p style={{ margin: "4px 0" }}>在 {m.where} 创建「网站应用」，拿到 App ID（纯数字）与 App Key：</p>
+                <ol style={{ margin: "4px 0", paddingLeft: 20 }}>
+                  <li>App ID 填的是<b>纯数字 ID</b>：不要带空格，也不要把 App Key 填到这里。若 QQ 跳到「公共返回码说明」报 <b>errcode=100008（client id is illegal）</b>，就是这里填错了。</li>
+                  <li>应用「<b>审核中</b>」时，只有设为<b>调试QQ号</b>的账号能登录：去 QQ 互联应用管理把你的 QQ 号加为调试QQ号；审核通过后所有 QQ 号可用。</li>
+                  <li>在 QQ 互联的应用信息里填写「<b>网站回调域</b>」：只填域名（例如 jisu.cn，不带 https:// 与路径），必须与下方回调地址的域名一致。</li>
+                  <li>把下方「本站回调地址」<b>逐字复制</b>到 QQ 互联应用的回调地址设置里。</li>
+                </ol>
+              </div>
+            )}
             <div className="form">
               <label className="check"><input type="checkbox" checked={cfg.enabled} onChange={(e) => setProviders({ ...providers, [p]: { ...cfg, enabled: e.target.checked } })} /> 启用{m.label}登录</label>
-              <label>本站回调地址<input value={cfg.callback} readOnly onFocus={(e) => e.target.select()} /></label>
-              <label>{m.idLabel}<input value={cfg.clientId} onChange={(e) => setProviders({ ...providers, [p]: { ...cfg, clientId: e.target.value } })} /></label>
-              <label>{m.secretLabel}<input type="password" value={secrets[p] || ""} placeholder={cfg.hasSecret ? "已设置（留空不改）" : "未设置"} onChange={(e) => setSecrets({ ...secrets, [p]: e.target.value })} /></label>
+              <label>本站回调地址
+                <span className="code-row">
+                  <input value={cfg.callback} readOnly onFocus={(e) => e.target.select()} />
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => void copyCallback(cfg.callback)}>复制</button>
+                </span>
+              </label>
+              <label>{m.idLabel}<input value={cfg.clientId} placeholder={p === "qq" ? "纯数字，如 123456789" : ""} onChange={(e) => setProviders({ ...providers, [p]: { ...cfg, clientId: e.target.value.trim() } })} /></label>
+              <label>{m.secretLabel}<input type="password" value={secrets[p] || ""} placeholder={cfg.hasSecret ? "已设置（留空不改）" : "未设置"} onChange={(e) => setSecrets({ ...secrets, [p]: e.target.value.trim() })} /></label>
             </div>
             <div className="btn-row">
               <button className="btn btn-primary" onClick={() => void save(p)}>保存{m.label}设置</button>

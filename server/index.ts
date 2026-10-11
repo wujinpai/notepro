@@ -1,9 +1,10 @@
 import express from "express";
 import type { Request, Response } from "express";
 import multer from "multer";
-import { existsSync, mkdirSync, readFileSync, unlinkSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, unlinkSync, copyFileSync, writeFileSync, readdirSync } from "node:fs";
 import { join, extname } from "node:path";
-import { db, getSetting, setSetting } from "./db.js";
+import { DatabaseSync } from "node:sqlite";
+import { db, getSetting, setSetting, DATA_DIR, DB_PATH } from "./db.js";
 import { hashPassword, verifyPassword, sha256, encryptSecret, verifyPayload, signPayload, maskEmail, randomToken } from "./util.js";
 import { sendEmailCode, verifyEmailCode, createSliderChallenge, verifySlider, consumeTicket, getSmtpConfig, sendMail } from "./mail.js";
 import {
@@ -56,6 +57,7 @@ function sitePayload() {
     footer: getSetting("site_footer", ""),
     icp: getSetting("site_icp", "黔ICP备2026016351号-1"),
     logo: getSetting("site_logo", ""),
+    accent: getSetting("site_accent", ""),
     registerOpen: getSetting("site_register_open", "1") === "1",
     oauthProviders: oauth,
   };
@@ -166,6 +168,28 @@ app.get("/api/auth/me", (req, res) => {
 function callbackUri(req: Request, p: Provider) {
   return `${siteOrigin(req)}/api/auth/oauth/${p}/callback`;
 }
+
+// OAuth 错误页：给可操作的中文指引（替代原来含糊的 alert 跳回首页）。
+// 真实环境最常见的失败是 GitHub 回来的 error=redirect_uri_mismatch —— 把「我们实际发出去的
+// redirect_uri」原样展示出来，管理员才能逐字核对平台侧的配置。
+const escAttr = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+function oauthErrorPage(res: Response, title: string, lines: string[]) {
+  const name = escAttr(getSetting("site_name", "己素"));
+  const body = lines.map((l) => `<p>${l}</p>`).join("");
+  res.status(400).type("html").send(
+    `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">` +
+    `<meta name="viewport" content="width=device-width,initial-scale=1">` +
+    `<title>${title} - ${name}</title>` +
+    `<style>body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;background:#f6f3ec;color:#36332c;margin:0;padding:32px 16px}` +
+    `.card{max-width:640px;margin:0 auto;background:#fffdf8;border:1px solid #e6e0cf;border-radius:12px;padding:28px 24px}` +
+    `h1{font-size:19px;margin:0 0 12px}.card p{font-size:14px;line-height:1.8;margin:8px 0}` +
+    `code{background:#f1ecdf;padding:2px 8px;border-radius:6px;font-size:13px;word-break:break-all}` +
+    `ol{font-size:14px;line-height:2;padding-left:22px;margin:8px 0}` +
+    `.home{display:inline-block;margin-top:16px;background:#1a73e8;color:#fff;text-decoration:none;padding:10px 28px;border-radius:7px;font-size:15px}` +
+    `.muted{color:#8a8375;font-size:12px}</style></head><body><div class="card"><h1>${title}</h1>${body}` +
+    `<a class="home" href="/">返回首页</a></div></body></html>`
+  );
+}
 app.get("/api/auth/oauth/:provider/start", (req, res) => {
   const p = req.params.provider as Provider;
   if (!PROVIDERS.includes(p)) return fail(res, 404, "不支持的第三方登录");
@@ -174,26 +198,57 @@ app.get("/api/auth/oauth/:provider/start", (req, res) => {
   const me = getSessionUser(req);
   const bind = req.query.bind === "1" && me ? me.id : 0;
   const state = signPayload({ p, bind, t: Date.now() });
-  res.redirect(authorizeUrl(p, cfg, callbackUri(req, p), state));
+  const uri = callbackUri(req, p);
+  console.log(`[oauth] start provider=${p} bind=${bind} redirect_uri=${uri}`);
+  res.redirect(authorizeUrl(p, cfg, uri, state));
 });
 app.get("/api/auth/oauth/:provider/callback", async (req, res) => {
   const p = req.params.provider as Provider;
-  const back = (msg: string) => res.redirect(`/?oauth_msg=${encodeURIComponent(msg)}`);
-  if (!PROVIDERS.includes(p)) return back("不支持的第三方登录");
+  if (!PROVIDERS.includes(p)) return oauthErrorPage(res, "第三方登录失败", ["不支持的第三方登录。"]);
+  const uri = callbackUri(req, p);
+  // 平台侧直接返回的错误（如 GitHub 的 redirect_uri_mismatch）：优先处理，别再报「授权被取消」
+  const perr = String(req.query.error || "");
+  if (perr) {
+    const desc = String(req.query.error_description || "");
+    console.log(`[oauth] provider error provider=${p} error=${perr} desc=${desc.slice(0, 200)} redirect_uri=${uri}`);
+    if (perr === "redirect_uri_mismatch") {
+      const plat = p === "github" ? "GitHub" : "QQ 互联";
+      const step1 = plat === "GitHub"
+        ? "GitHub 应用 → Settings → 左侧「Authorization callback URL」，必须与上面地址<b>逐字一致</b>（注意 http/https、域名、末尾斜杠、多余空格）。"
+        : "QQ 互联 → 应用管理 → 你的网站应用：①「<b>网站回调域</b>」只填域名（如 jisu.cn），必须与上面回调地址的域名一致；② 回调地址本身<b>逐字一致</b>（注意 http/https、末尾斜杠、多余空格）。";
+      return oauthErrorPage(res, "第三方登录失败", [
+        `${plat} 拒绝了本次登录：<b>回调地址不匹配</b>（redirect_uri_mismatch）。`,
+        `我们发给 ${plat} 的回调地址是：<br><code>${escAttr(uri)}</code>`,
+        `请逐字核对以下两处：<ol><li>${step1}</li>` +
+        `<li>本站 管理后台 → 站点设置 →「站点地址」：留空则按访问域名推导；若反向代理未透传协议可能推导错误，可直接填写 <code>https://你的域名</code>。</li></ol>`,
+        `<span class="muted">详细原因已记入服务端日志（docker logs 搜 [oauth]）。核对无误后回到登录页重新发起。</span>`,
+      ]);
+    }
+    if (perr === "access_denied") {
+      return oauthErrorPage(res, "已取消授权", ["你在平台授权页点了取消，没有完成授权。", "如需使用第三方登录，请回到登录页重新发起。"]);
+    }
+    const qqHint = p === "qq" && /invalid_client|100008|illegal/i.test(perr + desc)
+      ? "QQ 侧认为 App ID 非法：请检查后台填的是 connect.qq.com 网站应用的<b>纯数字 App ID</b>（别带空格、别和 App Key 搞混），且应用处于可用状态。"
+      : "";
+    return oauthErrorPage(res, "第三方登录失败", [`平台返回错误：<code>${escAttr(perr)}</code>${desc ? `（${escAttr(desc).slice(0, 200)}）` : ""}。`, qqHint, "请回到登录页重试；多次失败请联系管理员（日志搜 [oauth]）。"].filter(Boolean));
+  }
   const state = verifyPayload<{ p: string; bind: number; t: number }>(String(req.query.state || ""));
-  if (!state || state.p !== p || Date.now() - state.t > 10 * 60_000) return back("授权已过期，请重新登录");
+  if (!state || state.p !== p || Date.now() - state.t > 10 * 60_000) {
+    console.log(`[oauth] bad state provider=${p} hasState=${!!req.query.state}`);
+    return oauthErrorPage(res, "授权链接无效", ["授权链接已过期或无效（超过 10 分钟，或被重复使用）。", "请回到登录页重新发起第三方登录。"]);
+  }
   const code = String(req.query.code || "");
-  if (!code) return back("授权被取消或未取得授权码");
+  if (!code) return oauthErrorPage(res, "未取得授权码", ["平台没有返回授权码，可能在授权页点了取消。", "请回到登录页重试。"]);
   const cfg = getProviderConfig(p);
-  if (!cfg.enabled) return back("该第三方登录未配置或未启用");
+  if (!cfg.enabled) return oauthErrorPage(res, "第三方登录失败", ["该第三方登录未配置或未启用。"]);
   try {
     const profile = await exchangeProfile(p, cfg, code, callbackUri(req, p));
     const existing = db.prepare("SELECT user_id FROM oauth_accounts WHERE provider=? AND openid=?").get(p, profile.openid) as { user_id: number } | undefined;
     let user: UserRow | undefined;
     if (state.bind) {
       user = getUserById(state.bind);
-      if (!user) return back("绑定失败：登录状态已失效");
-      if (existing && existing.user_id !== user.id) return back("该第三方账号已绑定其他用户");
+      if (!user) return oauthErrorPage(res, "绑定失败", ["发起绑定时的登录状态已失效。", "请重新登录后再到用户中心绑定第三方账号。"]);
+      if (existing && existing.user_id !== user.id) return oauthErrorPage(res, "绑定失败", ["这个第三方账号已经绑定了其他用户。", "如需换绑，请先解绑原账号。"]);
       if (!existing) {
         db.prepare("INSERT INTO oauth_accounts(user_id,provider,openid,unionid,provider_nickname,provider_avatar,created_at) VALUES(?,?,?,?,?,?,?)")
           .run(user.id, p, profile.openid, profile.unionid, profile.nickname, profile.avatar, Date.now());
@@ -202,7 +257,7 @@ app.get("/api/auth/oauth/:provider/callback", async (req, res) => {
     }
     if (existing) {
       user = getUserById(existing.user_id);
-      if (!user) return back("账号不存在");
+      if (!user) return oauthErrorPage(res, "第三方登录失败", ["关联的用户账号不存在。"]);
     } else {
       // 自动建号：生成唯一用户名，不卡首次进入
       const base = (p === "github" ? "gh_" : "qq_") + (profile.nickname || profile.openid).replace(/[^A-Za-z0-9_一-龥]/g, "").slice(0, 16);
@@ -217,11 +272,16 @@ app.get("/api/auth/oauth/:provider/callback", async (req, res) => {
       db.prepare("INSERT INTO oauth_accounts(user_id,provider,openid,unionid,provider_nickname,provider_avatar,created_at) VALUES(?,?,?,?,?,?,?)")
         .run(user.id, p, profile.openid, profile.unionid, profile.nickname, profile.avatar, Date.now());
     }
-    if (user.status !== "active") return back("账号已被禁用，请联系管理员");
+    if (user.status !== "active") return oauthErrorPage(res, "账号已被禁用", ["该账号已被管理员禁用，请联系管理员。"]);
     setSessionCookie(res, createSession(req, user.id));
+    console.log(`[oauth] ok provider=${p} user=${user.id} bind=${state.bind ? 1 : 0}`);
     return res.redirect("/?oauth=ok");
   } catch (e) {
-    return back((e as Error).message || "第三方登录失败");
+    const emsg = (e as Error).message || "第三方登录失败";
+    console.log(`[oauth] callback failed provider=${p} msg=${emsg.slice(0, 300)}`);
+    const net = /fetch failed|timeout|ECONN|ENOTFOUND|network/i.test(emsg);
+    const netHint = () => net ? "疑似服务器无法访问平台接口，请确认服务器网络可达 " + (p === "github" ? "github.com / api.github.com。" : "graph.qq.com。") : "";
+    return oauthErrorPage(res, "第三方登录失败", [`${escAttr(emsg).slice(0, 400)}。`, netHint(), "请回到登录页重试；多次失败请联系管理员（日志搜 [oauth]）。"].filter(Boolean));
   }
 });
 
@@ -341,6 +401,7 @@ app.post("/api/me/sessions/others", requireAuth, (req, res) => { destroyOtherSes
 interface NoteRow {
   id: number; user_id: number; title: string; content: string; tags: string; weather: string; location: string;
   visibility: string; pinned: number; archived: number; created_at: number; updated_at: number;
+  view_count: number;
   share_token: string; allow_comments: number;
 }
 function noteJson(n: NoteRow, withAuthor = true) {
@@ -350,6 +411,7 @@ function noteJson(n: NoteRow, withAuthor = true) {
     tags: JSON.parse(n.tags || "[]") as string[],
     weather: n.weather, location: n.location, visibility: n.visibility,
     pinned: !!n.pinned, archived: !!n.archived, createdAt: n.created_at, updatedAt: n.updated_at,
+    viewCount: n.view_count || 0,
     allowComments: n.allow_comments !== 0,
     commentCount: (db.prepare("SELECT COUNT(*) c FROM comments WHERE note_id=?").get(n.id) as { c: number }).c,
     author: author ? { id: author.id, username: author.username, nickname: author.nickname || author.username, avatar: author.avatar } : null,
@@ -392,7 +454,48 @@ app.get("/api/notes", (req, res) => {
 app.get("/api/notes/:id", (req, res) => {
   const n = db.prepare("SELECT * FROM notes WHERE id=?").get(Number(req.params.id)) as NoteRow | undefined;
   if (!n || !visibleNote(req, n)) return fail(res, 404, "笔记不存在或不可见");
+  // 真实渲染才计数：详情页请求带 ?view=1（编辑器等内部读取不带，不计入）
+  if (req.query.view === "1") bumpViews(n.id);
   ok(res, { note: noteJson(n) });
+});
+
+// ---------- 浏览计数（只计数不追踪身份：不存 IP/UA/访客列表） ----------
+// 口径：详情真实渲染一次 +1；不去重刷新与爬虫，数据仅作趋势参考
+function bumpViews(noteId: number) {
+  try {
+    db.prepare("UPDATE notes SET view_count=view_count+1 WHERE id=?").run(noteId);
+    const t = new Date();
+    const day = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}-${String(t.getDate()).padStart(2, "0")}`;
+    db.prepare("INSERT INTO site_views(day,views) VALUES(?,1) ON CONFLICT(day) DO UPDATE SET views=views+1").run(day);
+  } catch { /* ignore */ }
+}
+
+// ---------- 公开独白只读（供真实路径 /n/<id> 与 sitemap；私密/归档/删除一律 404） ----------
+app.get("/api/public/notes/:id", (req, res) => {
+  const n = db.prepare("SELECT * FROM notes WHERE id=?").get(Number(req.params.id)) as NoteRow | undefined;
+  const author = n ? getUserById(n.user_id) : undefined;
+  if (!n || n.visibility !== "public" || n.archived || !author || author.status !== "active") {
+    return fail(res, 404, "笔记不存在或不可见");
+  }
+  if (req.query.view === "1") bumpViews(n.id);
+  ok(res, { note: noteJson(n) });
+});
+
+// ---------- sitemap / robots ----------
+app.get("/sitemap.xml", (req, res) => {
+  const origin = siteOrigin(req);
+  const rows = db.prepare(
+    "SELECT n.id, n.updated_at FROM notes n JOIN users u ON u.id=n.user_id WHERE n.visibility='public' AND n.archived=0 AND u.status='active' ORDER BY n.updated_at DESC"
+  ).all() as { id: number; updated_at: number }[];
+  const urls = rows.map((r) => {
+    const d = new Date(r.updated_at);
+    const lastmod = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    return `  <url><loc>${escAttr(`${origin}/n/${r.id}`)}</loc><lastmod>${lastmod}</lastmod></url>`;
+  }).join("\n");
+  res.type("application/xml").send(`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}\n</urlset>`);
+});
+app.get("/robots.txt", (req, res) => {
+  res.type("text/plain").send(`User-agent: *\nAllow: /\nSitemap: ${siteOrigin(req)}/sitemap.xml\n`);
 });
 
 // ---------- 分享链接（token 即凭证：私密笔记也可凭链接查看，但不进广场/搜索） ----------
@@ -431,6 +534,7 @@ app.get("/api/share/:token", (req, res) => {
   if (!n) return fail(res, 404, "链接不存在或已失效");
   const author = getUserById(n.user_id);
   if (!author || author.status !== "active") return fail(res, 404, "链接不存在或已失效");
+  if (req.query.view === "1") bumpViews(n.id);
   ok(res, { note: noteJson(n) });
 });
 
@@ -553,6 +657,14 @@ app.get("/api/admin/overview", requireAdmin, (_req, res) => {
     todayUsers: one(`SELECT COUNT(*) c FROM users WHERE created_at>=${today.getTime()}`),
     todayNotes: one(`SELECT COUNT(*) c FROM notes WHERE created_at>=${today.getTime()}`),
     todayVisits: one(`SELECT COUNT(*) c FROM visits WHERE created_at>=${today.getTime()}`),
+    totalViews: (() => { try { return (db.prepare("SELECT COALESCE(SUM(views),0) v FROM site_views").get() as { v: number }).v; } catch { return 0; } })(),
+    todayViews: (() => {
+      try {
+        const t = new Date();
+        const day = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}-${String(t.getDate()).padStart(2, "0")}`;
+        return (db.prepare("SELECT COALESCE(views,0) v FROM site_views WHERE day=?").get(day) as { v: number } | undefined)?.v || 0;
+      } catch { return 0; }
+    })(),
     recentUsers: (db.prepare("SELECT * FROM users ORDER BY id DESC LIMIT 8").all() as unknown as UserRow[]).map((u) => publicUser(u)),
   });
 });
@@ -618,6 +730,7 @@ app.get("/api/admin/site", requireAdmin, (_req, res) => {
     description: getSetting("site_description", ""), keywords: getSetting("site_keywords", ""),
     footer: getSetting("site_footer", ""), icp: getSetting("site_icp", "黔ICP备2026016351号-1"),
     logo: getSetting("site_logo", ""), url: getSetting("site_url", ""),
+    accent: getSetting("site_accent", ""),
     registerOpen: getSetting("site_register_open", "1") === "1",
     oauthShowLogin: getSetting("oauth_show_login", "1") === "1",
   });
@@ -632,6 +745,8 @@ app.put("/api/admin/site", requireAdmin, (req, res) => {
   setSetting("site_footer", str("footer", 300));
   setSetting("site_icp", str("icp", 60));
   setSetting("site_url", str("url", 200).replace(/\/$/, ""));
+  const accent = str("accent", 7);
+  setSetting("site_accent", /^#[0-9a-fA-F]{6}$/.test(accent) ? accent : "");
   setSetting("site_register_open", b.registerOpen === false ? "0" : "1");
   setSetting("oauth_show_login", b.oauthShowLogin === false ? "0" : "1");
   ok(res);
@@ -693,6 +808,77 @@ app.post("/api/admin/oauth/test", requireAdmin, (req, res) => {
 
 app.get("/api/health", (_req, res) => ok(res, { time: Date.now() }));
 
+// ---------- 数据备份（导出/恢复，仅管理员） ----------
+// 导出走一次性 token（60 秒有效，用后即焚）防盗链；恢复需二次确认（前端弹窗），
+// 恢复前自动把当前库备份到 data/backups（保留最近 5 份），替换后必须重启容器生效。
+const backupTokens = new Map<string, number>();
+app.post("/api/admin/backup/token", requireAdmin, (_req, res) => {
+  const token = randomToken(24);
+  backupTokens.set(token, Date.now() + 60_000);
+  ok(res, { token });
+});
+app.get("/api/admin/backup/download", (req, res) => {
+  const token = String(req.query.token || "");
+  const exp = backupTokens.get(token);
+  backupTokens.delete(token);
+  if (!exp || exp < Date.now()) return fail(res, 403, "下载凭证无效或已过期，请重新点击导出");
+  try { db.exec("PRAGMA wal_checkpoint(TRUNCATE)"); } catch { /* ignore */ }
+  const t = new Date();
+  const stamp = `${t.getFullYear()}${String(t.getMonth() + 1).padStart(2, "0")}${String(t.getDate()).padStart(2, "0")}-${String(t.getHours()).padStart(2, "0")}${String(t.getMinutes()).padStart(2, "0")}${String(t.getSeconds()).padStart(2, "0")}`;
+  res.setHeader("Content-Type", "application/octet-stream");
+  res.setHeader("Content-Disposition", `attachment; filename="notepro-backup-${stamp}.db"`);
+  res.sendFile(DB_PATH);
+});
+const backupUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 500 * 1024 * 1024 } });
+app.post("/api/admin/backup/restore", requireAdmin, backupUpload.single("file"), (req, res) => {
+  const buf = req.file?.buffer;
+  if (!buf || buf.length < 100) return fail(res, 400, "未收到有效的备份文件");
+  if (buf.subarray(0, 16).toString() !== "SQLite format 3\0") return fail(res, 400, "文件不是有效的 SQLite 数据库");
+  // 校验表结构：先写临时文件只读打开检查
+  const tmp = join(DATA_DIR, `restore-check-${Date.now()}.db`);
+  try {
+    writeFileSync(tmp, buf);
+    const chk = new DatabaseSync(tmp, { readOnly: true });
+    try {
+      const tables = new Set(
+        (chk.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[]).map((r) => r.name)
+      );
+      for (const t of ["users", "notes", "settings", "comments", "oauth_accounts", "sessions"]) {
+        if (!tables.has(t)) throw new Error(`缺少数据表：${t}`);
+      }
+      chk.exec("PRAGMA quick_check");
+    } finally { chk.close(); }
+  } catch (e) {
+    try { unlinkSync(tmp); } catch { /* ignore */ }
+    return fail(res, 400, `备份文件校验失败：${(e as Error).message}`);
+  }
+  try { unlinkSync(tmp); } catch { /* ignore */ }
+  // 恢复前先备份当前库到 data/backups（最多保留 5 份）
+  try {
+    const bdir = join(DATA_DIR, "backups");
+    mkdirSync(bdir, { recursive: true });
+    db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+    const t = new Date();
+    const stamp = `${t.getFullYear()}${String(t.getMonth() + 1).padStart(2, "0")}${String(t.getDate()).padStart(2, "0")}-${String(t.getHours()).padStart(2, "0")}${String(t.getMinutes()).padStart(2, "0")}${String(t.getSeconds()).padStart(2, "0")}`;
+    copyFileSync(DB_PATH, join(bdir, `notepro-${stamp}.db`));
+    const olds = readdirSync(bdir).filter((f) => f.startsWith("notepro-") && f.endsWith(".db")).sort();
+    while (olds.length > 5) { try { unlinkSync(join(bdir, olds.shift()!)); } catch { /* ignore */ } }
+  } catch (e) {
+    return fail(res, 500, `备份当前数据库失败，已中止恢复：${(e as Error).message}`);
+  }
+  try {
+    db.exec("PRAGMA wal_checkpoint(TRUNCATE)");
+    writeFileSync(DB_PATH, buf);
+    for (const suf of ["-wal", "-shm"]) { try { unlinkSync(DB_PATH + suf); } catch { /* ignore */ } }
+  } catch (e) {
+    return fail(res, 500, `写入备份失败：${(e as Error).message}`);
+  }
+  console.log("[backup] database restored from upload; container restart required");
+  ok(res, { message: "备份已恢复并保留了恢复前自动备份（data/backups）。请重启容器后生效，重建前站点将暂停服务。" });
+  // 关闭旧句柄：后续请求直接报错，避免静默写入已脱离的旧文件
+  setImmediate(() => { try { db.close(); } catch { /* ignore */ } });
+});
+
 // ---------- 前端静态与 SPA 回退 ----------
 // 部分浏览器会兜底请求 /favicon.ico，统一跳到当前生效图标
 app.get("/favicon.ico", (_req, res) => {
@@ -707,6 +893,34 @@ if (existsSync(PUBLIC_DIR)) {
   app.use(express.static(PUBLIC_DIR, { maxAge: "1h", index: false }));
   let indexCache: string | null = null;
   const escHtml = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  // 主题强调色衍生（与前端 api.ts 的 accentCss 同口径，保持两边一致）
+  const shade = (hex: string, amt: number): string => {
+    const n = parseInt(hex.slice(1), 16);
+    let r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+    if (amt >= 0) { r += (255 - r) * amt; g += (255 - g) * amt; b += (255 - b) * amt; }
+    else { r *= 1 + amt; g *= 1 + amt; b *= 1 + amt; }
+    const c = (v: number) => Math.round(Math.max(0, Math.min(255, v))).toString(16).padStart(2, "0");
+    return `#${c(r)}${c(g)}${c(b)}`;
+  };
+  const mix = (h1: string, h2: string, r: number): string => {
+    const a = parseInt(h1.slice(1), 16), b = parseInt(h2.slice(1), 16);
+    const ch = (v: number) => Math.round(Math.max(0, Math.min(255, v))).toString(16).padStart(2, "0");
+    const m = (x: number, y: number) => ch(x * r + y * (1 - r));
+    return `#${m((a >> 16) & 255, (b >> 16) & 255)}${m((a >> 8) & 255, (b >> 8) & 255)}${m(a & 255, b & 255)}`;
+  };
+  const luminance = (hex: string): number => {
+    const n = parseInt(hex.slice(1), 16);
+    const l = (v: number) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+    return 0.2126 * l((n >> 16) & 255) + 0.7152 * l((n >> 8) & 255) + 0.0722 * l(n & 255);
+  };
+  const accentStyle = (hex: string): string => {
+    if (!/^#[0-9a-fA-F]{6}$/.test(hex)) return "";
+    const onL = luminance(hex) > 0.45 ? "#202124" : "#ffffff";
+    const dAcc = shade(hex, 0.28);
+    const onD = luminance(dAcc) > 0.45 ? "#202124" : "#ffffff";
+    return `<style id="np-accent">:root{--accent:${hex};--accent-dark:${shade(hex, -0.15)};--accent-soft:${mix(hex, "#ffffff", 0.12)};--on-accent:${onL}}` +
+      `[data-theme="dark"]{--accent:${dAcc};--accent-dark:${shade(hex, 0.42)};--accent-soft:${mix(hex, "#201d19", 0.30)};--on-accent:${onD}}</style>`;
+  };
   const renderIndex = (): string => {
     if (indexCache === null) indexCache = readFileSync(join(PUBLIC_DIR, "index.html"), "utf8");
     const s = sitePayload();
@@ -718,7 +932,7 @@ if (existsSync(PUBLIC_DIR)) {
       .replace(/(<meta name="description" content=")[^"]*(")/, `$1${escHtml(s.description)}$2`)
       .replace(/<link rel="icon"[^>]*>/, `<link rel="icon" href="${icon}" />`)
       .replace(/<link rel="apple-touch-icon"[^>]*>/, `<link rel="apple-touch-icon" href="${icon}" />`)
-      .replace("</head>", `<script>window.__NP_SITE__=${boot}</script></head>`);
+      .replace("</head>", `${accentStyle(s.accent)}<script>window.__NP_SITE__=${boot}</script></head>`);
   };
   app.get("*", (req, res, next) => {
     if (req.path.startsWith("/api/") || req.path.startsWith("/uploads/")) return next();
