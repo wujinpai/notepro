@@ -422,6 +422,8 @@ export function AuthDialog({ site, onClose, onAuthed }: { site: SiteInfo; onClos
 }
 
 // ---------- 分享弹窗：链接 + 卡片海报（含右下角二维码） + 保存图片 ----------
+// 1px 透明 PNG：toPng 兜底 imagePlaceholder（失败图已在 settle 阶段剔除，此处绝不出现灰盒子）
+const TRANSPARENT_PX = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
 export interface ShareInfo { token: string; url: string; isAuthor: boolean }
 export function ShareDialog({ note, brand, onClose }: { note: NoteInfo; brand?: string; onClose: () => void }) {
   const [info, setInfo] = useState<ShareInfo | null>(null);
@@ -452,6 +454,19 @@ export function ShareDialog({ note, brand, onClose }: { note: NoteInfo; brand?: 
     QRCode.toDataURL(info.url, { width: 220, margin: 1 }).then(setQr).catch(() => setQr(""));
   }, [info]);
 
+  // 海报图片预加载：弹窗挂载即开始（与分享链接/二维码并行），避免冷缓存大图在生成阶段才开始下载。
+  // 预加载对象保存在 ref 防止被 GC，浏览器缓存命中后 settle/toPng 不再重复走网络。
+  const preloadRef = useRef<HTMLImageElement[]>([]);
+  useEffect(() => {
+    const urls = new Set<string>();
+    for (const s of imagesOf(note.content).slice(0, 9)) urls.add(isSameOriginUrl(s) ? s : proxyImageUrl(s));
+    const ra = note.author?.avatar || "";
+    if (ra) urls.add(isSameOriginUrl(ra) ? ra : proxyImageUrl(ra));
+    preloadRef.current = [...urls].map((u) => { const im = new Image(); im.src = u; return im; });
+    return () => { preloadRef.current = []; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [note.id]);
+
   // 海报生成：二维码就绪且海报 DOM 挂载后，用 html-to-image 导出 2x PNG。
   // 捕获节点必须在常规文档流中真实绘制：html-to-image 会把节点全部计算样式
   // （含 position/left）内联到克隆体再塞进 SVG foreignObject，屏外 fixed 会让克隆体
@@ -461,7 +476,9 @@ export function ShareDialog({ note, brand, onClose }: { note: NoteInfo; brand?: 
     let dead = false;
     setGenState("working"); setPosterPng(""); setSaveMsg(""); setBadImgs([]); setAvatarBad(false);
     // 外链图（正文 Markdown 外链、OAuth 外链头像）先改写为服务端代理地址再等待加载；
-    // 全部 <img> settle（load/error/4s 超时）后：坏图直接剔除（九宫格按剩余重排，不留占位）
+    // 全部 <img> settle：load 即过；error 立即记为坏图；仍在加载中的最多等 20s
+    //（手机慢网络下原图可达数 MB，4s 会把还没下完的好图误杀）。坏图直接剔除
+    //（九宫格按剩余重排，不留占位），20s 后仍未完成的才剔除。
     const settleImages = async (node: HTMLElement) => {
       node.querySelectorAll("img").forEach((el) => {
         const img = el as HTMLImageElement;
@@ -475,10 +492,11 @@ export function ShareDialog({ note, brand, onClose }: { note: NoteInfo; brand?: 
             new Promise<void>((done) => {
               const el = img as HTMLImageElement;
               if (el.complete && el.naturalWidth > 0) return done();
+              if (el.complete) return done(); // complete 但 naturalWidth=0 → 已失败，不必再等
               const onDone = () => done();
               el.addEventListener("load", onDone, { once: true });
               el.addEventListener("error", onDone, { once: true });
-              setTimeout(onDone, 4000);
+              setTimeout(onDone, 20000);
             })
         )
       );
@@ -511,7 +529,7 @@ export function ShareDialog({ note, brand, onClose }: { note: NoteInfo; brand?: 
         try { await (document as Document).fonts?.ready; } catch { /* ignore */ }
         await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
         if (dead) return null;
-        const url = await toPng(node, { pixelRatio: 2, cacheBust: true });
+        const url = await toPng(node, { pixelRatio: 2, cacheBust: true, imagePlaceholder: TRANSPARENT_PX });
         if (dead) return null;
         if (await isBlankPng(url)) return null; // 空白图视为失败
         return url;
