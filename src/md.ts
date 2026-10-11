@@ -94,16 +94,72 @@ export function renderMarkdown(src: string): string {
   return out.join("\n");
 }
 
+// 摘要 HTML：合法颜色标记 [color=#RRGGBB]…[/color]（仅恰好 6 位 hex，与 renderMarkdown 同规则）
+// 转成 <span style="color:#hex"> 参与渲染；非法/未配对标记仍按旧口径剥除标记文本。
+// 截断按可见字符计量，颜色段作为整体保护——截断点若落在颜色段内部，
+// 仍用完整的 span 包住能放下的部分，永远不会输出半截标记或裸原文。
 export function excerpt(content: string, n = 220): string {
-  const text = (content || "")
+  const stash: { hex: string; text: string }[] = [];
+  const keep = (hex: string, inner: string) => {
+    const text = inner.replace(/[#>*`\-]/g, "").replace(/\s+/g, " ").trim();
+    if (!text) return "";
+    stash.push({ hex: hex.toLowerCase(), text });
+    return `\u0001${stash.length - 1}\u0002`;
+  };
+  const src = (content || "")
     .replace(/```[\s\S]*?```/g, " ")
+    .replace(/\[color=#([0-9a-fA-F]{6})\]([^\n]*?)\[\/color\]/g, (_m, hex: string, inner: string) => keep(hex, inner))
     .replace(/\[color=#[0-9a-fA-F]{6}\]/gi, "")
     .replace(/\[\/color\]/gi, "")
     .replace(/!\[[^\]]*\]\([^)]*\)/g, " ")
     .replace(/[#>*`\-]/g, "")
     .replace(/\s+/g, " ")
     .trim();
-  return text.length > n ? text.slice(0, n) + "…" : text;
+  // 可见总长度（占位符按其内部文本计）
+  const visLen = (() => {
+    let len = 0; let last = 0; let m: RegExpExecArray | null;
+    const re = /\u0001(\d+)\u0002/g;
+    while ((m = re.exec(src))) {
+      len += m.index - last;
+      const st = stash[Number(m[1])];
+      if (st) len += st.text.length;
+      last = m.index + m[0].length;
+    }
+    return len + (src.length - last);
+  })();
+  const truncated = visLen > n;
+  // 拼装：纯文本按字符截断；颜色段整段保留，放不下时用 span 包住可放部分
+  const parts: string[] = [];
+  let vis = 0;
+  let done = false;
+  const re = /\u0001(\d+)\u0002/g;
+  let last = 0;
+  let m: RegExpExecArray | null;
+  const pushText = (t: string) => {
+    if (done || !t) return;
+    const room = n - vis;
+    if (room <= 0) { done = true; return; }
+    if (t.length <= room) { parts.push(t); vis += t.length; }
+    else { parts.push(t.slice(0, room)); vis = n; done = true; }
+  };
+  while ((m = re.exec(src)) && !done) {
+    pushText(src.slice(last, m.index));
+    last = m.index + m[0].length;
+    if (done) break;
+    const idx = Number(m[1]);
+    const st = stash[idx];
+    if (!st) continue;
+    const room = n - vis;
+    if (room <= 0) { done = true; break; }
+    if (st.text.length <= room) { parts.push(m[0]); vis += st.text.length; }
+    else { stash[idx] = { hex: st.hex, text: st.text.slice(0, room) }; parts.push(m[0]); vis = n; done = true; }
+  }
+  if (!done) pushText(src.slice(last));
+  const html = parts.join("").replace(/\u0001(\d+)\u0002/g, (_mm, i) => {
+    const st = stash[Number(i)];
+    return st ? `<span style="color:#${st.hex}">${esc(st.text)}</span>` : "";
+  });
+  return truncated ? html + "…" : html;
 }
 
 export function firstImage(content: string): string {

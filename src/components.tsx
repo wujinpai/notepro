@@ -97,7 +97,8 @@ export function Modal({ title, onClose, children, wide }: { title: string; onClo
 }
 
 // ---------- 滑块拼图验证 ----------
-const SW = 320, SH = 160, SP = 44;
+// SW/SH：挑战生成坐标系（服务端口径）；SHD：前端展示高度（压扁），拼图块等比压扁以贴合背景凹槽
+const SW = 320, SH = 160, SHD = 120, SP = 44;
 export function SliderCaptcha({ onTicket, resetKey }: { onTicket: (t: string) => void; resetKey: number }) {
   const [ch, setCh] = useState<{ id: string; bg: string; piece: string; y: number } | null>(null);
   const [x, setX] = useState(0);
@@ -150,10 +151,10 @@ export function SliderCaptcha({ onTicket, resetKey }: { onTicket: (t: string) =>
   const uri = (svg: string) => `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
   return (
     <div className="slider-wrap" ref={wrapRef}>
-      <div className="slider-stage" style={{ aspectRatio: `${SW}/${SH}` }}>
+      <div className="slider-stage" style={{ aspectRatio: `${SW}/${SHD}` }}>
         {ch && <img className="slider-bg" src={uri(ch.bg)} alt="滑块背景" draggable={false} />}
         {ch && <img className="slider-piece" src={uri(ch.piece)} alt="滑块" draggable={false}
-          style={{ left: x, width: SP * scale(), top: `${((ch?.y ?? 46) / SH) * 100}%` }} />}
+          style={{ left: x, width: SP * scale(), height: SP * scale() * (SHD / SH), top: `${((ch?.y ?? 46) / SH) * 100}%` }} />}
         {state === "ok" && <div className="slider-ok">✓ 验证通过</div>}
       </div>
       <div className="slider-track"
@@ -450,7 +451,7 @@ export function NoteCard({ note, onOpen, onComment }: {
         </div>
       )}
       {note.title && <h3>{note.title}</h3>}
-      {excerpt(note.content) && <p className="note-excerpt">{excerpt(note.content)}</p>}
+      {excerpt(note.content) && <p className="note-excerpt" dangerouslySetInnerHTML={{ __html: excerpt(note.content) }} />}
       {imgs.length > 0 && (
         <div className={`img-grid cols-${imgs.length === 1 ? 1 : imgs.length <= 4 ? 2 : 3}`}>
           {imgs.map((src, i) => (

@@ -137,9 +137,17 @@ async function main() {
   await shot(page, "home", 1366);
   const cardClean = await page.evaluate(() => {
     const card = [...document.querySelectorAll(".note-card")].find((c) => c.textContent.includes("颜色渲染检查"));
-    return card ? { found: true, noMarker: !card.textContent.includes("[color=#e03131]"), hasText: card.textContent.includes("我是中国人") } : { found: false };
+    if (!card) return { found: false };
+    const red = card.querySelector('.note-excerpt span[style*="color:#e03131"]');
+    return {
+      found: true,
+      noMarker: !card.textContent.includes("[color=#e03131]"),
+      hasText: card.textContent.includes("我是中国人"),
+      redSpan: !!red,
+      redText: red ? red.textContent : "",
+    };
   });
-  expect("游客首页：颜色帖卡片摘要不带标记原文", cardClean.found && cardClean.noMarker && cardClean.hasText, JSON.stringify(cardClean));
+  expect("游客首页：颜色帖卡片摘要带红色 span、无标记原文", cardClean.found && cardClean.noMarker && cardClean.hasText && cardClean.redSpan && cardClean.redText === "中国人", JSON.stringify(cardClean));
   await page.locator(".note-card", { hasText: "颜色渲染检查" }).first().click();
   await page.waitForTimeout(700);
   const detail = await page.evaluate(() => {
@@ -182,9 +190,15 @@ async function main() {
     JSON.stringify(authSeg));
   const sliderGeo = await page.evaluate(() => {
     const w = document.querySelector(".modal-panel .slider-wrap")?.getBoundingClientRect();
-    return w ? { w: w.width } : null;
+    const input = document.querySelector(".modal-panel .form input")?.getBoundingClientRect();
+    const stage = document.querySelector(".modal-panel .slider-stage")?.getBoundingClientRect();
+    return w && input && stage
+      ? { w: w.width, inputW: input.width, ratio: stage.height / stage.width }
+      : null;
   });
-  expect("登录弹窗：滑块拼图收窄居中（≤240px）", !!sliderGeo && sliderGeo.w <= 240 && sliderGeo.w > 150, JSON.stringify(sliderGeo));
+  expect("登录弹窗：滑块与表单左右对齐（等宽）、高度压扁（≈0.375）",
+    !!sliderGeo && Math.abs(sliderGeo.w - sliderGeo.inputW) < 3 &&
+    Math.abs(sliderGeo.ratio - 120 / 320) < 0.03, JSON.stringify(sliderGeo));
   await ctx.close();
 
   // ---------- 桌面 1366 管理员：菜单 / 用户中心后台标签 / 我的独白 / 编辑器 ----------
