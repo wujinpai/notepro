@@ -245,8 +245,10 @@ a.drawer-nav-item:hover, button.drawer-nav-item:hover { background: var(--surfac
 .note-card h3 { font-size: 18px; margin-top: 10px; overflow-wrap: anywhere; }
 .note-excerpt { color: var(--muted); margin-top: 6px; overflow-wrap: anywhere; }
 .note-env { display: flex; gap: 12px; color: var(--muted); font-size: 13px; margin-top: 8px; flex-wrap: wrap; }
-.note-env .env-wx, .note-env .env-loc { display: inline-flex; align-items: center; gap: 4px; }
-.note-env .env-wx svg, .note-env .env-loc svg { flex: none; }
+.note-env .env-wx, .note-env .env-loc,
+.foot-env .env-wx, .foot-env .env-loc { display: inline-flex; align-items: center; gap: 4px; }
+.note-env .env-wx svg, .note-env .env-loc svg,
+.foot-env .env-wx svg, .foot-env .env-loc svg { flex: none; display: block; }
 .note-meta-line .env-wx, .note-meta-line .env-loc { display: inline-flex; align-items: center; gap: 3px; vertical-align: -3px; }
 .note-thumb { margin-top: 10px; border-radius: var(--r-img); max-height: 260px; width: 100%; object-fit: cover; border: 1px solid var(--border); }
 
@@ -300,6 +302,7 @@ a.drawer-nav-item:hover, button.drawer-nav-item:hover { background: var(--surfac
 .foot-split { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .foot-split .foot-acts { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .my-note-item .foot-split { margin-top: 10px; }
+.note-detail .foot-split { margin-top: 22px; }
 .share-author { display: flex; align-items: center; gap: 10px; }
 
 /* 评论区 */
