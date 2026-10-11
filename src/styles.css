@@ -57,9 +57,7 @@ img { max-width: 100%; }
 }
 .act-btn svg { display: block; }
 button.act-btn:hover { background: var(--surface); color: var(--text); }
-.act-btn.off { cursor: default; opacity: .6; }
 .act-count { font-size: 13px; line-height: 1; }
-.act-off-text { font-size: 12px; }
 .brand { display: flex; align-items: center; gap: 10px; color: var(--text); min-width: 0; }
 .brand-badge {
   width: 34px; height: 34px; background: var(--accent); color: var(--on-accent); font-weight: 700; font-size: 19px;
@@ -139,6 +137,19 @@ button.act-btn:hover { background: var(--surface); color: var(--text); }
 .home-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; align-items: start; }
 .feed { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 .feed-tools { display: flex; gap: 8px; align-items: center; }
+.feed-hint { margin: 0; }
+/* 首页骨架屏：与 note-card 同宽/圆角/间距，加载中占位，不闪「暂无笔记」 */
+.skel-list { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.skel-card { border: 1px solid var(--border); border-radius: var(--r-card); background: var(--card); box-shadow: var(--shadow-card); padding: 18px; }
+.skel-line { height: 13px; border-radius: 6px; margin: 10px 0;
+  background: linear-gradient(90deg, var(--surface) 25%, var(--surface2) 50%, var(--surface) 75%);
+  background-size: 200% 100%; animation: skel-shimmer 1.3s linear infinite; }
+.skel-line:first-child { margin-top: 0; }
+.skel-line:last-child { margin-bottom: 0; }
+.skel-w40 { width: 40%; }
+.skel-w75 { width: 75%; }
+@keyframes skel-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) { .skel-line { animation: none; } }
 .search { max-width: 320px; }
 .side { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 .side-card { border: 1px solid var(--border); border-radius: var(--r-card); padding: 16px; background: var(--card); box-shadow: var(--shadow-card); }
@@ -413,7 +424,19 @@ label.check input { width: auto; }
 .opt { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--muted); }
 .opt-label { font-size: 13px; color: var(--muted); }
 .opt-row { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
+.tag-input { position: relative; }
 .tag-input .tag-chips { display: flex; flex-wrap: wrap; gap: 6px; border: 1px solid var(--border); border-radius: var(--r-ctl); padding: 6px; background: var(--card); }
+.tag-input .tag-chips input { border: none; background: transparent; padding: 5px 6px; flex: 1 1 140px; width: auto; min-width: 0; font-size: 16px; }
+.tag-input .tag-chips input:focus { outline: none; border: none; }
+/* 标签下拉：锚定输入框左右边，390px 不溢出 */
+.tag-drop { position: absolute; top: calc(100% + 6px); left: 0; right: 0; z-index: 60;
+  margin: 0; padding: 6px; list-style: none; max-height: 230px; overflow-y: auto;
+  background: var(--card); border: 1px solid var(--border); border-radius: var(--r-pop);
+  box-shadow: var(--shadow-pop); }
+.tag-drop button { display: block; width: 100%; text-align: left; padding: 9px 10px;
+  border-radius: var(--r-ctl); font-size: 16px; color: var(--text); }
+.tag-drop button:hover { background: var(--surface); }
+.tag-drop-empty { padding: 10px 12px; }
 .tag-chips input { border: none; flex: 1; min-width: 130px; padding: 4px; background: transparent; }
 .tag-chips input:focus { outline: none; }
 

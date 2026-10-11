@@ -45,8 +45,11 @@ export function Calendar({ month, days, selected, onMonth, onSelect }: {
   );
 }
 
-export function HomePage({ user, site, onOpenNote, onComment, q, onSearch, tag, onTag, date, onDate, month, onMonth, days, tags }: {
-  user: UserInfo | null; site: SiteInfo; onOpenNote: (n: NoteInfo) => void;
+// 首页信息流模块级缓存：刷新/从详情页返回时，筛选一致则先瞬间渲染缓存，再静默刷新
+let feedCache: { key: string; notes: NoteInfo[]; total: number } | null = null;
+const feedKey = (page: number, tag: string, q: string, date: string) => `${page}|${tag}|${q}|${date}`;
+
+export function HomePage({ user, site, onOpenNote, onComment, q, onSearch, tag, onTag, date, onDate, month, onMonth, days, tags }: {  user: UserInfo | null; site: SiteInfo; onOpenNote: (n: NoteInfo) => void;
   onComment: (n: NoteInfo) => void;
   q: string; onSearch: (v: string) => void;
   // 标签/日期过滤与日历数据由 App 层持有（抽屉与桌面侧栏共用同一份状态）
@@ -55,24 +58,61 @@ export function HomePage({ user, site, onOpenNote, onComment, q, onSearch, tag, 
   month: string; onMonth: (m: string) => void;
   days: Record<string, number>; tags: { name: string; count: number }[];
 }) {
-  const [notes, setNotes] = useState<NoteInfo[]>([]);
-  const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
+  const key = feedKey(page, tag, q, date);
+  // 挂载瞬间：筛选一致且有缓存 → 直接渲染缓存（从详情页返回不闪），再静默刷新
+  const cached = feedCache && feedCache.key === key ? feedCache : null;
+  const [notes, setNotes] = useState<NoteInfo[]>(() => cached?.notes ?? []);
+  const [total, setTotal] = useState<number>(() => cached?.total ?? 0);
+  const [loading, setLoading] = useState<boolean>(() => !cached); // 有缓存时不显示骨架
+  // 当前筛选是否已有一次成功的请求结论（缓存也算）：只有它为真且 0 条时，才显示「暂无笔记」
+  const [settled, setSettled] = useState<boolean>(() => !!cached);
+  const [errMsg, setErrMsg] = useState("");
+  const reqRef = useRef(0);
+  const keyRef = useRef(key);
+  keyRef.current = key;
+  const filterRef = useRef(`${tag}|${q}|${date}`);
+  const firstRunRef = useRef(true);
+  const initCachedRef = useRef(!!cached);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (silent: boolean) => {
+    const k = keyRef.current;
+    const filter = `${tag}|${q}|${date}`;
+    const id = ++reqRef.current;
+    if (!silent) {
+      setErrMsg("");
+      if (filter !== filterRef.current) {
+        // 过滤（搜索/标签/日期）变化：清列表走骨架屏；仅翻页则保留旧卡片等替换
+        filterRef.current = filter;
+        setLoading(true); setNotes([]); setTotal(0); setSettled(false);
+      }
+    }
     const params = new URLSearchParams({ page: String(page), size: "20" });
     if (tag) params.set("tag", tag);
     if (q) params.set("q", q);
     if (date) params.set("date", date);
     try {
       const d = await api.get<{ notes: NoteInfo[]; total: number }>(`/api/notes?${params}`);
-      setNotes(d.notes); setTotal(d.total);
-    } catch { setNotes([]); setTotal(0); }
+      if (id !== reqRef.current || keyRef.current !== k) return;
+      setNotes(d.notes); setTotal(d.total); setSettled(true); setErrMsg("");
+      feedCache = { key: k, notes: d.notes, total: d.total };
+    } catch {
+      if (id !== reqRef.current || keyRef.current !== k) return;
+      // 失败不清空页面：保留旧列表（若有），只给行内提示
+      setErrMsg("网络开小差，列表加载失败");
+    } finally {
+      if (id === reqRef.current && keyRef.current === k && !silent) setLoading(false);
+    }
   }, [page, tag, q, date]);
 
   // 搜索词/标签/日期任一过滤变化时回第一页（含抽屉在非首页设置后带回的过滤）
   useEffect(() => { setPage(1); }, [q, tag, date]);
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    // 首次挂载且命中缓存：瞬间渲染缓存，后台静默刷新，不闪骨架/空态
+    const silent = firstRunRef.current && initCachedRef.current;
+    firstRunRef.current = false;
+    void load(silent);
+  }, [load]);
 
   const [calOpen, setCalOpen] = useState(false);
 
@@ -85,8 +125,26 @@ export function HomePage({ user, site, onOpenNote, onComment, q, onSearch, tag, 
             {tag && <button className="chip chip-on" onClick={() => onTag("")}>#{tag} ✕</button>}
           </div>
         )}
-        {notes.length === 0 && <div className="empty">暂无笔记{user ? "，点击右上角「独白」发布第一篇" : ""}。</div>}
-        {notes.map((n) => <NoteCard key={n.id} note={n} onOpen={onOpenNote} onComment={onComment} />)}
+        {errMsg && notes.length > 0 && <p className="err-text feed-hint">{errMsg}</p>}
+        {loading && notes.length === 0 ? (
+          <div className="skel-list" role="status" aria-label="加载中">
+            {[0, 1, 2].map((i) => (
+              <div key={i} className="skel-card" aria-hidden="true">
+                <div className="skel-line skel-w40" />
+                <div className="skel-line" />
+                <div className="skel-line skel-w75" />
+              </div>
+            ))}
+          </div>
+        ) : (
+          notes.map((n) => <NoteCard key={n.id} note={n} onOpen={onOpenNote} onComment={onComment} />)
+        )}
+        {settled && !loading && notes.length === 0 && !errMsg && (
+          <div className="empty">暂无笔记{user ? "，点击右上角「独白」发布第一篇" : ""}。</div>
+        )}
+        {!loading && notes.length === 0 && errMsg && (
+          <div className="empty">{errMsg}。<button className="text-btn" onClick={() => void load(false)}>重试</button></div>
+        )}
         {total > 20 && (
           <div className="pager">
             <button className="btn btn-ghost" disabled={page <= 1} onClick={() => setPage(page - 1)}>上一页</button>
@@ -312,7 +370,7 @@ export function NoteDetail({ noteId, user, onBack, onEdit, onDeleted, focusComme
         {mine && <button className="btn btn-danger" onClick={() => void del()}>删除</button>}
       </div>
       {shareOpen && <ShareDialog note={note} onClose={() => setShareOpen(false)} />}
-      <CommentsSection note={note} user={user} focus={focusComments} onAuthRequest={onAuthRequest} />
+      {note.allowComments && <CommentsSection note={note} user={user} focus={focusComments} onAuthRequest={onAuthRequest} />}
     </article>
   );
 }
@@ -363,30 +421,26 @@ function CommentsSection({ note, user, focus, onAuthRequest }: {
 
   return (
     <section className="comments" ref={boxRef} aria-label="评论区">
-      <h4>评论{note.allowComments && comments.length > 0 ? ` · ${comments.length}` : ""}</h4>
-      {!note.allowComments ? (
-        <p className="muted">作者已关闭评论</p>
+      <h4>评论{comments.length > 0 ? ` · ${comments.length}` : ""}</h4>
+      {user ? (
+        <div className="comment-form">
+          <textarea ref={taRef} value={text} rows={3} maxLength={500} placeholder="写下你的评论…"
+            onChange={(e) => setText(e.target.value)} />
+          <div className="comment-form-row">
+            <span className="muted tiny">{text.length}/500</span>
+            {err && <span className="err-text">{err}</span>}
+            <button type="button" className="btn btn-primary btn-sm" disabled={busy || !text.trim()} onClick={() => void submit()}>
+              {busy ? "发表中…" : "发表评论"}
+            </button>
+          </div>
+        </div>
       ) : (
-        <>
-          {user ? (
-            <div className="comment-form">
-              <textarea ref={taRef} value={text} rows={3} maxLength={500} placeholder="写下你的评论…"
-                onChange={(e) => setText(e.target.value)} />
-              <div className="comment-form-row">
-                <span className="muted tiny">{text.length}/500</span>
-                {err && <span className="err-text">{err}</span>}
-                <button type="button" className="btn btn-primary btn-sm" disabled={busy || !text.trim()} onClick={() => void submit()}>
-                  {busy ? "发表中…" : "发表评论"}
-                </button>
-              </div>
-            </div>
-          ) : (
-            <div className="comment-login-hint">
-              <span className="muted">登录后发表评论</span>
-              <button type="button" className="btn btn-ghost btn-sm" onClick={onAuthRequest}>登录</button>
-            </div>
-          )}
-          <div className="comment-list">
+        <div className="comment-login-hint">
+          <span className="muted">登录后发表评论</span>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={onAuthRequest}>登录</button>
+        </div>
+      )}
+      <div className="comment-list">
             {loaded && comments.length === 0 && <p className="muted tiny">还没有评论，来坐第一个。</p>}
             {comments.map((c) => (
               <div key={c.id} className="comment-item">
@@ -402,8 +456,6 @@ function CommentsSection({ note, user, focus, onAuthRequest }: {
               </div>
             ))}
           </div>
-        </>
-      )}
     </section>
   );
 }

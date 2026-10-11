@@ -478,23 +478,63 @@ export function ShareDialog({ note, onClose }: { note: NoteInfo; onClose: () => 
 // ---------- 标签输入 ----------
 export function TagInput({ value, onChange, suggestions }: { value: string[]; onChange: (t: string[]) => void; suggestions: string[] }) {
   const [draft, setDraft] = useState("");
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
   const add = (t: string) => {
     const v = t.trim().slice(0, 24);
     if (v && !value.includes(v) && value.length < 10) onChange([...value, v]);
     setDraft("");
   };
+  const addRef = useRef(add);
+  addRef.current = add;
+  // 已有标签：排除已选；输入文字时按关键字过滤；空输入时展开全部
+  const kw = draft.trim();
+  const shown = suggestions.filter((s) => !value.includes(s) && (!kw || s.includes(kw)));
+  // 点外部关闭（顺手提交草稿，沿用旧版失焦即添加的口径）；Esc 关闭
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: PointerEvent) => {
+      if (!wrapRef.current?.contains(e.target as Node)) {
+        const v = (wrapRef.current?.querySelector("input") as HTMLInputElement | null)?.value.trim() || "";
+        if (v) addRef.current(v);
+        setOpen(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("pointerdown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("pointerdown", onDown); document.removeEventListener("keydown", onKey); };
+  }, [open ]);
   return (
-    <div className="tag-input">
+    <div className="tag-input" ref={wrapRef}>
       <div className="tag-chips">
         {value.map((t) => (
           <span key={t} className="chip chip-on">#{t}<button type="button" onClick={() => onChange(value.filter((x) => x !== t))} aria-label={`删除标签 ${t}`}>✕</button></span>
         ))}
-        <input value={draft} placeholder="输入标签回车添加" list="tag-suggest"
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); add(draft); } }}
-          onBlur={() => draft && add(draft)} />
-        <datalist id="tag-suggest">{suggestions.map((s) => <option key={s} value={s} />)}</datalist>
+        <input value={draft} placeholder="点击选择或输入标签，回车添加"
+          role="combobox" aria-expanded={open} aria-haspopup="listbox" aria-autocomplete="list"
+          onChange={(e) => { setDraft(e.target.value); setOpen(true); }}
+          onFocus={() => setOpen(true)}
+          onClick={() => setOpen(true)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") { e.preventDefault(); add(draft); }
+            else if (e.key === "Escape") setOpen(false);
+          }} />
       </div>
+      {open && shown.length > 0 && (
+        <ul className="tag-drop" role="listbox" aria-label="已有标签">
+          {shown.map((s) => (
+            <li key={s}>
+              <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => add(s)}>#{s}</button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {open && shown.length === 0 && (
+        <div className="tag-drop tag-drop-empty muted tiny" aria-hidden="true">
+          {kw ? `无匹配标签，回车可新建「${kw.slice(0, 24)}」` : "还没有可用标签，直接输入回车新建"}
+        </div>
+      )}
     </div>
   );
 }
@@ -574,15 +614,11 @@ export function NoteCard({ note, onOpen, onComment }: {
       )}
       {note.tags.length > 0 && <div className="tag-row">{note.tags.map((t) => <span key={t} className="chip">#{t}</span>)}</div>}
       <div className="note-card-foot">
-        {note.allowComments ? (
+        {note.allowComments && (
           <button type="button" className="act-btn" aria-label={`评论（${note.commentCount} 条）`} title="评论"
             onClick={(e) => { e.stopPropagation(); onComment(note); }}>
             <BubbleIcon /><span className="act-count">{note.commentCount}</span>
           </button>
-        ) : (
-          <span className="act-btn off" role="img" aria-label="评论已关闭" title="评论已关闭">
-            <BubbleIcon /><span className="act-off-text">评论已关闭</span>
-          </span>
         )}
         <button type="button" className="act-btn share-act" aria-label="分享" title="分享"
           onClick={(e) => { e.stopPropagation(); setShareOpen(true); }}><PlaneIcon /></button>
