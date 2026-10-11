@@ -5,7 +5,7 @@
 - 技术栈：React + Vite + Express + TypeScript，Node 24（`node:sqlite` 单文件库），单 Docker 镜像
 - 界面：全中文，Google Material 色板，棱角分明（2–4px 小圆角），自动跟随系统明暗 + 手动切换，PC 与 390px 手机零横向溢出（已实测）
 
-## 本地运行
+## 本地运行（开发/自检）
 
 ```bash
 npm install
@@ -19,16 +19,104 @@ SESSION_SECRET=请改成长随机串 npm start   # http://localhost:3001
 
 ## Docker 部署
 
+### 1. 首次部署（一步一步来）
+
+**第 1 步：建数据目录**
+
 ```bash
-docker build -t notepro .
-docker run -d --restart unless-stopped --name notepro -p 18082:3001 \
+sudo mkdir -p /opt/apps/notepro/data /opt/apps/notepro/storage
+```
+
+`data` 放 SQLite 数据库（`notepro.db`），`storage` 放上传的图片，两个目录都要映射成数据卷，容器重建数据才不丢。
+
+**第 2 步：写 `.env`（`SESSION_SECRET` 必填）**
+
+```bash
+cd /opt/apps/notepro
+# 生成随机密钥并写入 .env（只做一次，生成后妥善保存）
+echo "SESSION_SECRET=$(openssl rand -hex 32)" > .env
+chmod 600 .env
+```
+
+`SESSION_SECRET` 用于会话签名和密钥加密（SMTP 密码、OAuth 密钥、天气 Key 都是用它加密存的），生产环境必填。注意：**换掉它会导致已登录会话全部失效、已加密存的密钥无法解密**（需重新填写），所以生成一次后不要再动。
+
+可选：SMTP（不配也行）。不配置也能注册登录——验证码会打印在容器日志的 `[email-code]` 行里；也可以稍后在管理后台「邮箱设置」里图形化配置（后台配置优先于环境变量）：
+
+```bash
+cat >> .env <<'EOF'
+SMTP_HOST=smtp.example.com
+SMTP_PORT=465
+SMTP_SECURE=true
+SMTP_USER=you@example.com
+SMTP_PASS=授权码或密码
+SMTP_FROM=noreply@example.com
+SMTP_FROM_NAME=笔墨留香
+EOF
+```
+
+**第 3 步：拉镜像并启动**
+
+```bash
+cd /opt/apps/notepro
+docker pull wujinpai/notepro:latest
+docker run -d --restart unless-stopped --name notepro \
+  -p 18082:3001 \
   --env-file .env \
   -v /opt/apps/notepro/data:/app/data \
   -v /opt/apps/notepro/storage:/app/storage \
-  notepro
+  wujinpai/notepro:latest
 ```
 
-`.env` 只需 `SESSION_SECRET` 与可选 `PORT`（见 `.env.example`）。数据卷：`data`（SQLite）、`storage`（上传图片）。
+镜像 `wujinpai/notepro`（amd64 + arm64 双架构），容器内监听 `3001`，映射到宿主 `18082` 端口。
+
+**第 4 步：打开并注册管理员**
+
+浏览器打开 `http://服务器IP:18082`，点登录/注册——**第一个注册的账号自动成为管理员**。之后在「用户中心 → 管理后台」里配置站点名称、Logo、SMTP、GitHub/QQ 登录、天气与位置 Key 等。
+
+常用命令：
+
+```bash
+docker logs -f notepro     # 看日志（含 [email-code] 验证码）
+docker restart notepro     # 重启
+docker stop notepro        # 停止
+```
+
+### 2. 更新升级（数据不丢）
+
+```bash
+cd /opt/apps/notepro && docker pull wujinpai/notepro:latest && docker stop notepro && docker rm notepro && docker run -d --restart unless-stopped --name notepro -p 18082:3001 --env-file .env -v /opt/apps/notepro/data:/app/data -v /opt/apps/notepro/storage:/app/storage wujinpai/notepro:latest
+```
+
+数据都在 `data/` 与 `storage/` 卷里，删容器重建不影响数据和已上传的图片。
+
+### 3. docker-compose（可选）
+
+```yaml
+services:
+  notepro:
+    image: wujinpai/notepro:latest
+    container_name: notepro
+    restart: unless-stopped
+    ports:
+      - "18082:3001"
+    env_file: .env
+    volumes:
+      - /opt/apps/notepro/data:/app/data
+      - /opt/apps/notepro/storage:/app/storage
+```
+
+```bash
+docker compose up -d              # 启动
+docker compose pull && docker compose up -d   # 更新
+```
+
+### 反向代理
+
+nginx 反代到 `http://127.0.0.1:18082` 即可，HTTPS 证书、301 跳转都在代理层做，应用本身不需要改配置。
+
+### 备份
+
+定期备份 `/opt/apps/notepro/data`（SQLite 文件 `notepro.db` 就在里面）和 `/opt/apps/notepro/storage`（上传的图片），拷走即备份；恢复时先停容器、拷回、再启动。管理后台也有「数据库备份/恢复」，可一键下载备份文件。
 
 ## 功能概览
 
