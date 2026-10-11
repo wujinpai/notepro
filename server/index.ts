@@ -14,6 +14,7 @@ import {
 import type { UserRow } from "./auth.js";
 import { PROVIDERS, getProviderConfig, saveProviderConfig, authorizeUrl, exchangeProfile } from "./oauth.js";
 import type { Provider } from "./oauth.js";
+import { assertProxyTarget, fetchProxyImage, ProxyImageError, PROXY_TIMEOUT_MS } from "./proxy-image.js";
 
 const app = express();
 const PORT = Number(process.env.PORT || 3001);
@@ -900,6 +901,29 @@ app.post("/api/admin/geo/test-geo", requireAdmin, async (req, res) => {
   const r = await tencentReverse(31.21, 107.47);
   if ("qerror" in r) return ok(res, { ok: false, error: r.qerror });
   ok(res, { ok: true, ...r });
+});
+
+// 图片代理：登录态 + SSRF 防护，供分享海报加载外链图（同源回源，无 CORS 问题）。
+// SSRF：只允许 http/https、默认端口，DNS 解析后逐 IP 拦截私网/回环/链路本地；重定向逐跳重验。
+app.get("/api/proxy-image", requireAuth, rateLimit(60, 60_000, "proxyimg"), async (req, res) => {
+  const raw = String(req.query.url || "");
+  if (!raw) return fail(res, 400, "缺少 url 参数");
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), PROXY_TIMEOUT_MS);
+  try {
+    const target = await assertProxyTarget(raw);
+    const { bytes, contentType } = await fetchProxyImage(target, ctrl.signal);
+    res.status(200)
+      .set("Content-Type", contentType)
+      .set("Content-Length", String(bytes.length))
+      .set("Cache-Control", "public, max-age=86400")
+      .end(bytes);
+  } catch (e) {
+    if (e instanceof ProxyImageError) return fail(res, e.status === 400 ? 400 : 502, e.message);
+    return fail(res, 502, "图片抓取失败");
+  } finally {
+    clearTimeout(timer);
+  }
 });
 
 app.get("/api/admin/oauth", requireAdmin, (req, res) => {

@@ -3,7 +3,7 @@ import QRCode from "qrcode";
 import { toPng } from "html-to-image";
 import { api, fmtTime, type NoteInfo, type SiteInfo, type UserInfo } from "./api";
 import { excerpt, imagesOf } from "./md";
-import { isSameOriginUrl, isBlankPng } from "./poster-util";
+import { isSameOriginUrl, isBlankPng, proxyImageUrl } from "./poster-util";
 
 // ---------- 扁平线条图标（stroke=currentColor，全站统一） ----------
 const line = {
@@ -434,7 +434,8 @@ export function ShareDialog({ note, brand, onClose }: { note: NoteInfo; brand?: 
   const [saveMsg, setSaveMsg] = useState("");
   const [genKey, setGenKey] = useState(0); // 递增 → 重新生成海报
   const [genState, setGenState] = useState<"idle" | "working" | "done" | "fail">("idle");
-  const [badImgs, setBadImgs] = useState<number[]>([]); // 同源图加载失败下标 → 占位块
+  const [badImgs, setBadImgs] = useState<number[]>([]); // 加载失败的图下标 → 直接从九宫格剔除（无占位）
+  const [avatarBad, setAvatarBad] = useState(false); // 头像代理失败 → 首字母兜底
   const inputRef = useRef<HTMLInputElement>(null);
   const posterRef = useRef<HTMLDivElement>(null);
 
@@ -458,9 +459,15 @@ export function ShareDialog({ note, brand, onClose }: { note: NoteInfo; brand?: 
   useEffect(() => {
     if (!qr) return;
     let dead = false;
-    setGenState("working"); setPosterPng(""); setSaveMsg(""); setBadImgs([]);
-    // 等全部 <img> settle（load/error/4s 超时），同步挑出坏图换占位后再抓取
+    setGenState("working"); setPosterPng(""); setSaveMsg(""); setBadImgs([]); setAvatarBad(false);
+    // 外链图（正文 Markdown 外链、OAuth 外链头像）先改写为服务端代理地址再等待加载；
+    // 全部 <img> settle（load/error/4s 超时）后：坏图直接剔除（九宫格按剩余重排，不留占位）
     const settleImages = async (node: HTMLElement) => {
+      node.querySelectorAll("img").forEach((el) => {
+        const img = el as HTMLImageElement;
+        const s = img.getAttribute("src") || "";
+        if (s && !isSameOriginUrl(s) && !s.startsWith("/api/proxy-image")) img.src = proxyImageUrl(s);
+      });
       const imgs = Array.from(node.querySelectorAll("img"));
       await Promise.all(
         imgs.map(
@@ -476,13 +483,19 @@ export function ShareDialog({ note, brand, onClose }: { note: NoteInfo; brand?: 
         )
       );
       const bad: number[] = [];
-      node.querySelectorAll("img[data-ph]").forEach((el) => {
+      let avBad = false;
+      node.querySelectorAll("img").forEach((el) => {
         const img = el as HTMLImageElement;
-        if (!(img.complete && img.naturalWidth > 0)) bad.push(Number((img as HTMLElement).dataset.ph));
+        if (img.complete && img.naturalWidth > 0) return;
+        if (img.hasAttribute("data-avatar")) { avBad = true; return; }
+        const ph = img.getAttribute("data-ph");
+        if (ph != null) { bad.push(Number(ph)); return; }
+        img.remove(); // 正文内联坏图：直接移除该图位，不留占位
       });
-      if (bad.length && !dead) {
+      if ((bad.length || avBad) && !dead) {
         setBadImgs(bad);
-        await new Promise((r) => setTimeout(r, 80)); // 等占位 DOM 提交
+        setAvatarBad(avBad);
+        await new Promise((r) => setTimeout(r, 80)); // 等剔除后 DOM 提交
       }
     };
     const run = async (): Promise<string | null> => {
@@ -567,8 +580,12 @@ export function ShareDialog({ note, brand, onClose }: { note: NoteInfo; brand?: 
   };
 
   const imgs = imagesOf(note.content).slice(0, 9);
-  // OAuth 头像可能是外链（GitHub/QQ），海报里只用同源头像，否则用首字母占位
-  const avatarUrl = note.author?.avatar && isSameOriginUrl(note.author.avatar) ? note.author.avatar : "";
+  // 剔除加载失败的图后剩余图片（九宫格按剩余数自然重排，不留占位）
+  const visibleImgs = imgs.map((src, i) => ({ src, i })).filter(({ i }) => !badImgs.includes(i));
+  // OAuth 头像可能是外链（GitHub/QQ）：经服务端代理加载，失败则首字母兜底
+  const rawAvatar = note.author?.avatar || "";
+  const avatarSrc = rawAvatar ? (isSameOriginUrl(rawAvatar) ? rawAvatar : proxyImageUrl(rawAvatar)) : "";
+  const avatarLetter = (note.author?.nickname || "用户").slice(0, 1).toUpperCase();
   const regen = () => setGenKey((k) => k + 1);
 
   return (
@@ -609,7 +626,11 @@ export function ShareDialog({ note, brand, onClose }: { note: NoteInfo; brand?: 
             <div ref={posterRef} className="poster-capture">
               <div className="poster">
                 <div className="poster-head">
-                  <Avatar url={avatarUrl} name={note.author?.nickname || "用户"} size={96} />
+                  {avatarSrc && !avatarBad ? (
+                    <img className="avatar" style={{ width: 96, height: 96 }} src={avatarSrc} data-avatar="1" alt={note.author?.nickname || "用户"} />
+                  ) : (
+                    <span className="avatar avatar-fallback" style={{ width: 96, height: 96, fontSize: 40 }}>{avatarLetter}</span>
+                  )}
                   <div className="poster-meta">
                     <strong>{note.author?.nickname || "用户"}</strong>
                     <span>@{note.author?.username} · {fmtTime(note.createdAt)}</span>
@@ -623,15 +644,11 @@ export function ShareDialog({ note, brand, onClose }: { note: NoteInfo; brand?: 
                 )}
                 {note.title && <h3 className="poster-title">{note.title}</h3>}
                 {excerpt(note.content, 300) && <p className="poster-excerpt" dangerouslySetInnerHTML={{ __html: excerpt(note.content, 300) }} />}
-                {imgs.length > 0 && (
-                  <div className={`poster-imgs cols-${imgs.length === 1 ? 1 : imgs.length <= 4 ? 2 : 3}`}>
-                    {imgs.map((src, i) =>
-                      !isSameOriginUrl(src) || badImgs.includes(i) ? (
-                        <div key={i} className="poster-img-ph"><span>图片</span></div>
-                      ) : (
-                        <img key={i} src={src} alt="" data-ph={i} />
-                      )
-                    )}
+                {visibleImgs.length > 0 && (
+                  <div className={`poster-imgs cols-${visibleImgs.length === 1 ? 1 : visibleImgs.length <= 4 ? 2 : 3}`}>
+                    {visibleImgs.map(({ src, i }) => (
+                      <img key={i} src={isSameOriginUrl(src) ? src : proxyImageUrl(src)} alt="" data-ph={i} />
+                    ))}
                   </div>
                 )}
                 {note.tags.length > 0 && (
