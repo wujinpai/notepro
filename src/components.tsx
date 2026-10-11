@@ -3,6 +3,7 @@ import QRCode from "qrcode";
 import { toPng } from "html-to-image";
 import { api, fmtTime, type NoteInfo, type SiteInfo, type UserInfo } from "./api";
 import { excerpt, imagesOf } from "./md";
+import { isSameOriginUrl, isBlankPng } from "./poster-util";
 
 // ---------- 扁平线条图标（stroke=currentColor，全站统一） ----------
 const line = {
@@ -429,9 +430,11 @@ export function ShareDialog({ note, brand, onClose }: { note: NoteInfo; brand?: 
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [genMsg, setGenMsg] = useState("");
   const [saveBusy, setSaveBusy] = useState(false);
   const [saveMsg, setSaveMsg] = useState("");
+  const [genKey, setGenKey] = useState(0); // 递增 → 重新生成海报
+  const [genState, setGenState] = useState<"idle" | "working" | "done" | "fail">("idle");
+  const [badImgs, setBadImgs] = useState<number[]>([]); // 同源图加载失败下标 → 占位块
   const inputRef = useRef<HTMLInputElement>(null);
   const posterRef = useRef<HTMLDivElement>(null);
 
@@ -448,39 +451,76 @@ export function ShareDialog({ note, brand, onClose }: { note: NoteInfo; brand?: 
     QRCode.toDataURL(info.url, { width: 220, margin: 1 }).then(setQr).catch(() => setQr(""));
   }, [info]);
 
-  // 海报生成：二维码就绪且隐藏海报 DOM 挂载后，用 html-to-image 导出 2x PNG
+  // 海报生成：二维码就绪且海报 DOM 挂载后，用 html-to-image 导出 2x PNG。
+  // 捕获节点必须在常规文档流中真实绘制：html-to-image 会把节点全部计算样式
+  // （含 position/left）内联到克隆体再塞进 SVG foreignObject，屏外 fixed 会让克隆体
+  // 画到画布之外 → 空白图但 resolve。因此用零高裁剪容器包裹，而非 fixed 偏移。
   useEffect(() => {
     if (!qr) return;
     let dead = false;
-    setGenMsg(""); setPosterPng(""); setSaveMsg("");
-    const node = posterRef.current;
-    if (!node) return;
-    const waitImgs = async () => {
+    setGenState("working"); setPosterPng(""); setSaveMsg(""); setBadImgs([]);
+    // 等全部 <img> settle（load/error/4s 超时），同步挑出坏图换占位后再抓取
+    const settleImages = async (node: HTMLElement) => {
       const imgs = Array.from(node.querySelectorAll("img"));
-      await Promise.all(imgs.map((img) => {
-        const el = img as HTMLImageElement;
-        if (el.complete && el.naturalWidth > 0) return Promise.resolve();
-        return new Promise<void>((res) => {
-          const done = () => res();
-          el.addEventListener("load", done, { once: true });
-          el.addEventListener("error", done, { once: true });
-          setTimeout(done, 3000);
-        });
-      }));
+      await Promise.all(
+        imgs.map(
+          (img) =>
+            new Promise<void>((done) => {
+              const el = img as HTMLImageElement;
+              if (el.complete && el.naturalWidth > 0) return done();
+              const onDone = () => done();
+              el.addEventListener("load", onDone, { once: true });
+              el.addEventListener("error", onDone, { once: true });
+              setTimeout(onDone, 4000);
+            })
+        )
+      );
+      const bad: number[] = [];
+      node.querySelectorAll("img[data-ph]").forEach((el) => {
+        const img = el as HTMLImageElement;
+        if (!(img.complete && img.naturalWidth > 0)) bad.push(Number((img as HTMLElement).dataset.ph));
+      });
+      if (bad.length && !dead) {
+        setBadImgs(bad);
+        await new Promise((r) => setTimeout(r, 80)); // 等占位 DOM 提交
+      }
+    };
+    const run = async (): Promise<string | null> => {
+      try {
+        const node = posterRef.current;
+        if (!node || dead) return null;
+        for (let i = 0; i < 40 && node.scrollHeight === 0 && !dead; i++) {
+          await new Promise((r) => setTimeout(r, 50)); // 等待真实布局尺寸
+        }
+        if (!node || node.scrollHeight === 0 || dead) return null;
+        await settleImages(node);
+        if (dead) return null;
+        try { await (document as Document).fonts?.ready; } catch { /* ignore */ }
+        await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+        if (dead) return null;
+        const url = await toPng(node, { pixelRatio: 2, cacheBust: true });
+        if (dead) return null;
+        if (await isBlankPng(url)) return null; // 空白图视为失败
+        return url;
+      } catch {
+        return null; // 抛错转为空，走统一重试/失败态
+      }
     };
     (async () => {
       try {
-        await waitImgs();
-        try { await (document as Document).fonts?.ready; } catch { /* ignore */ }
-        await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-        const url = await toPng(node, { pixelRatio: 2, cacheBust: true });
-        if (!dead) setPosterPng(url);
+        let url = await run();
+        if (!url && !dead) {
+          await new Promise((r) => setTimeout(r, 600));
+          if (!dead) url = await run(); // 自动重试一次
+        }
+        if (!url) throw new Error("poster-empty");
+        if (!dead) { setPosterPng(url); setGenState("done"); }
       } catch {
-        if (!dead) setGenMsg("海报生成失败，请关闭重试");
+        if (!dead) setGenState("fail");
       }
     })();
     return () => { dead = true; };
-  }, [qr]);
+  }, [qr, genKey]);
 
   const copy = async () => {
     if (!info) return;
@@ -527,7 +567,9 @@ export function ShareDialog({ note, brand, onClose }: { note: NoteInfo; brand?: 
   };
 
   const imgs = imagesOf(note.content).slice(0, 9);
-  const hideImg = (e: React.SyntheticEvent<HTMLImageElement>) => { (e.target as HTMLImageElement).style.display = "none"; };
+  // OAuth 头像可能是外链（GitHub/QQ），海报里只用同源头像，否则用首字母占位
+  const avatarUrl = note.author?.avatar && isSameOriginUrl(note.author.avatar) ? note.author.avatar : "";
+  const regen = () => setGenKey((k) => k + 1);
 
   return (
     <Modal title="分享" onClose={onClose}>
@@ -536,14 +578,21 @@ export function ShareDialog({ note, brand, onClose }: { note: NoteInfo; brand?: 
       {info && (
         <>
           <div className="share-poster-wrap">
-            {posterPng ? (
+            {genState === "done" && posterPng ? (
               <img className="share-poster-preview" src={posterPng} alt="分享海报预览" />
+            ) : genState === "fail" ? (
+              <div className="share-poster-fail" role="alert">
+                <p>海报生成失败</p>
+                <button type="button" className="btn btn-ghost" onClick={regen}>重新生成</button>
+              </div>
             ) : (
-              <div className="share-poster-loading" role="status">{genMsg || "海报生成中…"}</div>
+              <div className="share-poster-loading" role="status">海报生成中…</div>
             )}
           </div>
-          <button type="button" className="btn btn-primary btn-block" disabled={!posterPng || saveBusy} onClick={() => void savePoster()}>
-            {saveBusy ? "保存中…" : !posterPng ? "生成中…" : "保存图片"}
+          <button type="button" className="btn btn-primary btn-block"
+            disabled={saveBusy || (genState !== "done" && genState !== "fail")}
+            onClick={() => { if (genState === "fail") regen(); else void savePoster(); }}>
+            {saveBusy ? "保存中…" : genState === "fail" ? "重新生成" : genState === "done" ? "保存图片" : "生成中…"}
           </button>
           {saveMsg && <p className="ok-text">{saveMsg}</p>}
           <div className="share-link-row">
@@ -554,12 +603,13 @@ export function ShareDialog({ note, brand, onClose }: { note: NoteInfo; brand?: 
             <span className="muted tiny">任何人凭此链接可查看{note.visibility === "private" ? "这篇私密独白" : "这篇独白"}</span>
             {info.isAuthor && <button type="button" className="btn btn-danger btn-sm" disabled={busy} onClick={() => void reset()}>重置链接</button>}
           </div>
-          {/* 隐藏的海报捕获节点：750px 固定宽、屏外渲染，2x 导出 */}
+          {/* 海报捕获节点：常规文档流 + 零高裁剪容器（屏外 fixed 会使 html-to-image 克隆画出画布 → 空白图） */}
           {qr && (
-            <div ref={posterRef} className="poster-capture" aria-hidden="true">
+            <div className="poster-capture-wrap" aria-hidden="true">
+            <div ref={posterRef} className="poster-capture">
               <div className="poster">
                 <div className="poster-head">
-                  <Avatar url={note.author?.avatar || ""} name={note.author?.nickname || "用户"} size={96} />
+                  <Avatar url={avatarUrl} name={note.author?.nickname || "用户"} size={96} />
                   <div className="poster-meta">
                     <strong>{note.author?.nickname || "用户"}</strong>
                     <span>@{note.author?.username} · {fmtTime(note.createdAt)}</span>
@@ -575,7 +625,13 @@ export function ShareDialog({ note, brand, onClose }: { note: NoteInfo; brand?: 
                 {excerpt(note.content, 300) && <p className="poster-excerpt" dangerouslySetInnerHTML={{ __html: excerpt(note.content, 300) }} />}
                 {imgs.length > 0 && (
                   <div className={`poster-imgs cols-${imgs.length === 1 ? 1 : imgs.length <= 4 ? 2 : 3}`}>
-                    {imgs.map((src, i) => <img key={i} src={src} alt="" onError={hideImg} />)}
+                    {imgs.map((src, i) =>
+                      !isSameOriginUrl(src) || badImgs.includes(i) ? (
+                        <div key={i} className="poster-img-ph"><span>图片</span></div>
+                      ) : (
+                        <img key={i} src={src} alt="" data-ph={i} />
+                      )
+                    )}
                   </div>
                 )}
                 {note.tags.length > 0 && (
@@ -584,11 +640,12 @@ export function ShareDialog({ note, brand, onClose }: { note: NoteInfo; brand?: 
                 <div className="poster-foot">
                   <span className="poster-brand">{brand || "己素 · 笔墨留香"}</span>
                   <div className="poster-qr">
-                    <img src={qr} alt="" onError={hideImg} />
+                    <img src={qr} alt="" />
                     <span>扫码打开这篇独白</span>
                   </div>
                 </div>
               </div>
+            </div>
             </div>
           )}
         </>

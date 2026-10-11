@@ -581,7 +581,14 @@ th { color: var(--muted); font-weight: 500; font-size: 13px; }
 .share-poster-preview { display: block; width: 100%; height: auto; }
 .share-poster-loading { padding: 52px 0; text-align: center; color: var(--muted); }
 /* 隐藏的海报捕获节点：固定 750px、屏外渲染，供 html-to-image 2x 导出；海报用固定浅色，与主题无关 */
-.poster-capture { position: fixed; left: -10000px; top: 0; width: 750px; pointer-events: none; }
+/* 海报捕获：零高裁剪容器包裹常规流节点（屏外 fixed 会使 html-to-image 克隆画出画布 → 空白图） */
+.poster-capture-wrap { height: 0; overflow: hidden; }
+.poster-capture { width: 750px; }
+.poster-img-ph { width: 100%; aspect-ratio: 1; border-radius: 12px; background: #ece7da; color: #a09a8c;
+  display: flex; align-items: center; justify-content: center; font-size: 28px; }
+.poster-imgs.cols-1 .poster-img-ph { aspect-ratio: 16/10; max-height: 520px; }
+.share-poster-fail { display: flex; flex-direction: column; align-items: center; gap: 12px;
+  padding: 36px 16px; color: var(--muted); }
 .poster { width: 750px; background: #fffdf8; color: #3d3830; border-radius: 20px; padding: 48px; font-size: 30px; line-height: 1.6; box-sizing: border-box; }
 .poster-head { display: flex; align-items: center; gap: 22px; }
 .poster-head .avatar { flex: none; }
