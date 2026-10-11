@@ -221,6 +221,9 @@ a.drawer-nav-item:hover, button.drawer-nav-item:hover { background: var(--surfac
 .note-card h3 { font-size: 18px; margin-top: 10px; overflow-wrap: anywhere; }
 .note-excerpt { color: var(--muted); margin-top: 6px; overflow-wrap: anywhere; }
 .note-env { display: flex; gap: 12px; color: var(--muted); font-size: 13px; margin-top: 8px; flex-wrap: wrap; }
+.note-env .env-wx, .note-env .env-loc { display: inline-flex; align-items: center; gap: 4px; }
+.note-env .env-wx svg, .note-env .env-loc svg { flex: none; }
+.note-meta-line .env-wx, .note-meta-line .env-loc { display: inline-flex; align-items: center; gap: 3px; vertical-align: -3px; }
 .note-thumb { margin-top: 10px; border-radius: var(--r-img); max-height: 260px; width: 100%; object-fit: cover; border: 1px solid var(--border); }
 
 /* 图片九宫格：1 张大图 / 2–4 张两列 / 5–9 张三列 */
@@ -341,6 +344,8 @@ label.check input { width: auto; }
 .code-row input { flex: 1; }
 .opt-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .opt-geo-row { display: flex; align-items: center; gap: 10px; margin-top: 8px; min-height: 24px; }
+.opt-geo-row .text-btn { display: inline-flex; align-items: center; gap: 4px; }
+.opt-geo-row .text-btn svg { flex: none; }
 
 /* 滑块 */
 .slider-wrap { display: flex; flex-direction: column; gap: 6px; width: 100%; }

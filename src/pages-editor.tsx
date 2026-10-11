@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api, type NoteInfo } from "./api";
-import { TagInput } from "./components";
+import { PinIcon, TagInput } from "./components";
 import { countImages, renderMarkdown } from "./md";
 
 const COLOR_PRESETS = ["#e03131", "#e8590c", "#f08c00", "#2f9e44", "#1098ad", "#1971c2", "#7048e8", "#d6336c"];
@@ -202,11 +202,19 @@ export function EditorPage({ note, onSaved, onCancel }: {
           fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,weather_code`)
             .then((r) => { if (!r.ok) throw new Error("wx"); return r.json(); }),
         ]).then(([g, w]) => {
-          // 位置：取行政层级 adminLevel 4（市级，如"重庆市"→"重庆"），兜底 city/locality/principalSubdivision
+          // 位置：优先行政层级 6（区/县，名字原样保留，如"郫都区"）→ 5（地级市，去尾"市"，如"成都市"→"成都"）
+          // → 兜底 locality → city → principalSubdivision（省，仅在更细层级都没有时用）。
+          // BigDataCloud adminLevel 实测：2 国家 / 4 省或直辖市 / 5 地级市 / 6 区县 / 7 街道或开发区 / 8 社区
           const admins: { adminLevel?: number; name?: string }[] = g?.localityInfo?.administrative || [];
-          const lvl4 = admins.find((a) => (a.adminLevel ?? 0) >= 4 && (a.adminLevel ?? 0) < 6)?.name || "";
-          let loc = lvl4 || g?.city || g?.locality || g?.principalSubdivision || "";
-          loc = String(loc).replace(/市$/, "");
+          const lvl6 = admins.find((a) => a.adminLevel === 6)?.name || "";
+          const lvl5 = admins.find((a) => a.adminLevel === 5)?.name || "";
+          let loc: string;
+          let cityLevel: boolean;
+          if (lvl6) { loc = lvl6; cityLevel = false; }
+          else if (lvl5) { loc = lvl5; cityLevel = true; }
+          else { loc = String(g?.locality || g?.city || g?.principalSubdivision || ""); cityLevel = true; }
+          loc = loc.replace(/區/g, "区"); // 接口 zh 偶有繁体"區"，统一简体
+          if (cityLevel) loc = loc.replace(/市$/, ""); // 市级及兜底去尾"市"；区/县名原样保留
           if (loc) setLocation((v) => v || loc);
           const code = w?.current?.weather_code;
           const temp = w?.current?.temperature_2m;
@@ -302,7 +310,7 @@ export function EditorPage({ note, onSaved, onCancel }: {
         </div>
         <div className="opt-geo-row">
           <button type="button" className="text-btn" disabled={geoBusy} onClick={autoFillGeo} aria-label="自动获取天气与位置">
-            {geoBusy ? "定位获取中…" : "📍 自动获取"}
+            {geoBusy ? "定位获取中…" : <><PinIcon /> 自动获取</>}
           </button>
           {geoMsg && <span className="muted tiny" role="status">{geoMsg}</span>}
         </div>

@@ -70,6 +70,118 @@ export function PlaneIcon() {
   );
 }
 
+export function PinIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" focusable="false" {...line}>
+      <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z" />
+      <circle cx="12" cy="10" r="3" />
+    </svg>
+  );
+}
+
+// ---------- 天气图标（扁平线条，与全站图标同口径） ----------
+const CLOUD = "M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z";
+
+export function SunIcon18() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" focusable="false" {...line}>
+      <circle cx="12" cy="12" r="4" />
+      <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
+    </svg>
+  );
+}
+
+export function PartlyCloudyIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" focusable="false" {...line}>
+      <circle cx="7.5" cy="7.5" r="2.6" />
+      <path d="M7.5 2.8v1.3M2.8 7.5h1.3M4.2 4.2l.9.9" />
+      <g transform="translate(7.8 9.3) scale(0.66)">
+        <path d={CLOUD} />
+      </g>
+    </svg>
+  );
+}
+
+export function OvercastIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" focusable="false" {...line}>
+      <path d={CLOUD} />
+    </svg>
+  );
+}
+
+export function RainIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" focusable="false" {...line}>
+      <g transform="translate(0 -2.5)">
+        <path d={CLOUD} />
+      </g>
+      <path d="M8 18.5v2.5M12 17.5v2.5M16 18.5v2.5" />
+    </svg>
+  );
+}
+
+export function SnowIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" focusable="false" {...line}>
+      <g transform="translate(0 -2.5)">
+        <path d={CLOUD} />
+      </g>
+      <path d="M8 19h.01M12 21h.01M16 19h.01" />
+    </svg>
+  );
+}
+
+export function FogIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" focusable="false" {...line}>
+      <path d="M5 8h14M3 12h14M5 16h14M7 20h10" />
+    </svg>
+  );
+}
+
+export function StormIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" focusable="false" {...line}>
+      <g transform="translate(0 -2.5)">
+        <path d={CLOUD} />
+      </g>
+      <path d="M13.5 14.5 9.5 20.5h5l-1.8 3.2" />
+    </svg>
+  );
+}
+
+// 按天气文本关键词选图标：雷 > 雪 > 雾/霾 > 雨 > 阴 > 晴 > 云，都不中默认多云
+function weatherKind(text: string): "sun" | "partly" | "overcast" | "rain" | "snow" | "fog" | "storm" {
+  if (/雷/.test(text)) return "storm";
+  if (/雪|冰雹/.test(text)) return "snow";
+  if (/雾|霾/.test(text)) return "fog";
+  if (/雨/.test(text)) return "rain";
+  if (/阴/.test(text)) return "overcast";
+  if (/晴/.test(text)) return "sun";
+  if (/云/.test(text)) return "partly";
+  return "partly";
+}
+
+// 天气徽标：只显示图标，原始完整文本放 title/aria-label（悬停可看）
+export function WeatherBadge({ text }: { text: string }) {
+  const k = weatherKind(text);
+  const icon =
+    k === "sun" ? <SunIcon18 /> :
+    k === "overcast" ? <OvercastIcon /> :
+    k === "rain" ? <RainIcon /> :
+    k === "snow" ? <SnowIcon /> :
+    k === "fog" ? <FogIcon /> :
+    k === "storm" ? <StormIcon /> : <PartlyCloudyIcon />;
+  return <span className="env-wx" data-wx={k} title={text} aria-label={text} role="img">{icon}</span>;
+}
+
+// 位置徽标：扁平定位图标 + 文字
+export function LocationBadge({ text }: { text: string }) {
+  return <span className="env-loc" title={text}><PinIcon />{text}</span>;
+}
+
 export function Avatar({ url, name, size = 36 }: { url: string; name: string; size?: number }) {
   const style = { width: size, height: size, fontSize: Math.max(12, size * 0.42) };
   if (url) return <img className="avatar" style={style} src={url} alt={name} />;
@@ -446,8 +558,8 @@ export function NoteCard({ note, onOpen, onComment }: {
       </header>
       {(note.weather || note.location) && (
         <div className="note-env">
-          {note.weather && <span>🌤 {note.weather}</span>}
-          {note.location && <span>📍 {note.location}</span>}
+          {note.weather && <WeatherBadge text={note.weather} />}
+          {note.location && <LocationBadge text={note.location} />}
         </div>
       )}
       {note.title && <h3>{note.title}</h3>}

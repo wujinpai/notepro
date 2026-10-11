@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, fmtTime, type CommentInfo, type NoteInfo, type SiteInfo, type UserInfo } from "./api";
-import { Avatar, Lightbox, MoonIcon, NoteCard, PlaneIcon, ShareDialog, SunIcon, imageHit } from "./components";
+import { Avatar, Lightbox, LocationBadge, MoonIcon, NoteCard, PlaneIcon, ShareDialog, SunIcon, WeatherBadge, imageHit } from "./components";
 import { renderMarkdown } from "./md";
 
 export function Calendar({ month, days, selected, onMonth, onSelect }: {
@@ -296,8 +296,8 @@ export function NoteDetail({ noteId, user, onBack, onEdit, onDeleted, focusComme
       {note.title && <h1>{note.title}</h1>}
       <div className="note-meta-line muted">
         {note.author?.nickname} · {new Date(note.createdAt).toLocaleString("zh-CN")}
-        {note.weather && <span> · 🌤 {note.weather}</span>}
-        {note.location && <span> · 📍 {note.location}</span>}
+        {note.weather && <span> · <WeatherBadge text={note.weather} /></span>}
+        {note.location && <span> · <LocationBadge text={note.location} /></span>}
         {note.pinned && <span className="badge badge-pin">置顶</span>}
         {note.visibility === "private" && <span className="badge">私密</span>}
         {note.archived && <span className="badge">归档</span>}

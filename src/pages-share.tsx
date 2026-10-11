@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, bootSite, cacheSite, applyAccent, fmtTime, type NoteInfo, type SiteInfo } from "./api";
-import { Avatar, Lightbox, imageHit } from "./components";
+import { Avatar, Lightbox, LocationBadge, WeatherBadge, imageHit } from "./components";
 import { renderMarkdown } from "./md";
 
 // 独立分享页（/s/<token> 真实路径）与公开独白只读页（/n/<id>）：极简品牌行 + 笔记正文 + 页脚备案，无任何作者控件
@@ -66,8 +66,8 @@ export function SharePage({ token, noteId }: { token?: string; noteId?: number }
               {note.title && <h1>{note.title}</h1>}
               {(note.weather || note.location) && (
                 <div className="note-env">
-                  {note.weather && <span>🌤 {note.weather}</span>}
-                  {note.location && <span>📍 {note.location}</span>}
+                  {note.weather && <WeatherBadge text={note.weather} />}
+                  {note.location && <LocationBadge text={note.location} />}
                 </div>
               )}
               <div className="markdown"
