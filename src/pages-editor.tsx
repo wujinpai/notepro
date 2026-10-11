@@ -1,24 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { api, type NoteInfo } from "./api";
 import { PinIcon, TagInput } from "./components";
+import { wmoToZh } from "./weather";
 import { countImages, renderMarkdown } from "./md";
 
 const COLOR_PRESETS = ["#e03131", "#e8590c", "#f08c00", "#2f9e44", "#1098ad", "#1971c2", "#7048e8", "#d6336c"];
-
-// WMO 天气码 → 中文（Open-Meteo current.weather_code）
-const WMO_ZH: Record<number, string> = {
-  0: "晴",
-  1: "以晴为主", 2: "多云", 3: "阴",
-  45: "雾", 48: "雾凇",
-  51: "毛毛雨", 53: "毛毛雨", 55: "毛毛雨",
-  56: "冻毛毛雨", 57: "冻毛毛雨",
-  61: "小雨", 63: "中雨", 65: "大雨",
-  66: "冻雨", 67: "冻雨",
-  71: "小雪", 73: "中雪", 75: "大雪", 77: "雪粒",
-  80: "阵雨", 81: "阵雨", 82: "暴雨",
-  85: "阵雪", 86: "阵雪",
-  95: "雷阵雨", 96: "雷阵雨伴冰雹", 99: "雷阵雨伴冰雹",
-};
 
 export function EditorPage({ note, onSaved, onCancel }: {
   note: NoteInfo | null; onSaved: (n: NoteInfo) => void; onCancel: () => void;
@@ -218,7 +204,7 @@ export function EditorPage({ note, onSaved, onCancel }: {
           if (loc) setLocation((v) => v || loc);
           const code = w?.current?.weather_code;
           const temp = w?.current?.temperature_2m;
-          const desc = typeof code === "number" ? WMO_ZH[code] : undefined;
+          const desc = wmoToZh(code);
           if (desc && typeof temp === "number") setWeather((v) => v || `${desc} ${Math.round(temp)}°C`);
           else if (desc) setWeather((v) => v || desc);
           if (!loc && !desc) setGeoMsg("获取失败，请手动填写");
