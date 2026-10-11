@@ -1,5 +1,6 @@
 /* NotePro —— Memos 式暖调视觉：暖米底 + 近白暖卡面 + 统一小圆角，明暗双主题成对定义 */
 :root {
+  --footer-h: 52px;
   --accent: #1a73e8; --accent-dark: #1765cc; --accent-soft: #e8f0fe; --on-accent: #ffffff; --red: #d93025; --green: #188038;
   --bg: #f6f3ec; --card: #fffdf8; --surface: #f1ecdf; --surface2: #eae4d3;
   --text: #36332c; --muted: #8a8375; --border: #e6e0cf;
@@ -19,7 +20,8 @@
   color-scheme: dark;
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
-html, body { max-width: 100%; overflow-x: hidden; }
+html, body { max-width: 100%; }
+body { overflow-x: hidden; }
 body {
   font-family: "Google Sans", Roboto, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   background: var(--bg); color: var(--text); font-size: 15px; line-height: 1.6;
@@ -36,7 +38,7 @@ textarea { resize: vertical; }
 img { max-width: 100%; }
 
 .app { min-height: 100vh; display: flex; flex-direction: column; }
-.container { flex: 1; width: 100%; max-width: 1120px; margin: 0 auto; padding: 20px 16px 40px; min-width: 0; }
+.container { flex: 1; width: 100%; max-width: 1120px; margin: 0 auto; padding: 20px 16px calc(var(--footer-h) + env(safe-area-inset-bottom) + 24px); min-width: 0; }
 
 /* 顶栏 */
 .topbar {
@@ -338,10 +340,12 @@ a.drawer-nav-item:hover, button.drawer-nav-item:hover { background: var(--surfac
 .share-foot-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
 .share-page { min-height: 100vh; display: flex; flex-direction: column; }
 .share-brand {
+  position: sticky; top: 0; z-index: 40;
   display: flex; align-items: center; gap: 10px; width: 100%; max-width: 760px;
   margin: 0 auto; padding: 16px; color: var(--text);
+  background: var(--bg); border-bottom: 1px solid var(--border);
 }
-.share-main { flex: 1; width: 100%; max-width: 760px; margin: 0 auto; padding: 4px 16px 28px; min-width: 0; }
+.share-main { flex: 1; width: 100%; max-width: 760px; margin: 0 auto; padding: 4px 16px calc(var(--footer-h) + env(safe-area-inset-bottom) + 24px); min-width: 0; }
 .share-card { border: 1px solid var(--border); border-radius: var(--r-card); background: var(--card); box-shadow: var(--shadow-card); padding: 20px; min-width: 0; }
 .share-card h1 { font-size: 24px; margin: 12px 0 8px; overflow-wrap: anywhere; }
 .share-home-row { display: flex; justify-content: center; margin-top: 18px; }
@@ -481,10 +485,15 @@ th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--bor
 th { color: var(--muted); font-weight: 500; font-size: 13px; }
 
 .site-footer {
-  border-top: 1px solid var(--border); color: var(--muted); font-size: 13px;
-  padding: 16px; display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; text-align: center;
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
+  min-height: var(--footer-h); box-sizing: border-box;
+  background: var(--bg); border-top: 1px solid var(--border); color: var(--muted); font-size: 13px;
+  padding: 8px 16px calc(8px + env(safe-area-inset-bottom));
+  display: flex; gap: 12px; align-items: center; justify-content: center;
+  white-space: nowrap; overflow: hidden;
 }
-.site-footer .icp-link { color: var(--muted); white-space: nowrap; }
+.site-footer > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; }
+.site-footer .icp-link { color: var(--muted); white-space: nowrap; flex: none; }
 .site-footer .icp-link:hover { color: var(--accent); }
 
 /* 响应式：390px 手机零横向溢出 */
@@ -508,7 +517,7 @@ th { color: var(--muted); font-weight: 500; font-size: 13px; }
   .stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .brand-sub { display: none; }
   .search { max-width: none; flex: 1; }
-  .container { padding: 14px 10px 32px; }
+  .container { padding: 14px 10px calc(var(--footer-h) + env(safe-area-inset-bottom) + 20px); }
   .user-chip span { display: none; }
   .icon-btn.menu-btn { display: inline-flex; }
   /* 移动端顶栏精简：搜索/主题/独白/头像/游客登录注册全部收进抽屉，右侧只留登录后的笔 */
