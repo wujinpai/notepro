@@ -161,6 +161,14 @@ a.side-user:hover { border-color: var(--accent); }
 .cal-collapse.open { grid-template-rows: 1fr; }
 .cal-collapse-inner { overflow: hidden; min-height: 0; }
 .cal-collapse-inner .calendar { margin-top: 10px; }
+/* OAuth 设置卡折叠：与日历折叠同实现口径（0fr↔1fr） */
+.oauth-fold-head { display: flex; align-items: center; gap: 10px; width: 100%; padding: 4px 0; margin: 0 0 4px; color: var(--text); text-align: left; cursor: pointer; }
+.oauth-fold-title { font-size: 16px; font-weight: 600; margin-right: auto; white-space: nowrap; }
+.oauth-fold-head .badge { flex: none; }
+.oauth-collapse { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .32s ease; }
+.oauth-collapse.open { grid-template-rows: 1fr; }
+.oauth-collapse-inner { overflow: hidden; min-height: 0; }
+.oauth-collapse-inner .form { margin-top: 8px; }
 .calendar-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
 .calendar-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 2px; }
 .cal-dow span { text-align: center; font-size: 12px; color: var(--muted); padding: 2px 0; }

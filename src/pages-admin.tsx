@@ -294,6 +294,16 @@ function OauthSettings() {
   const [providers, setProviders] = useState<Record<string, { enabled: boolean; clientId: string; hasSecret: boolean; callback: string }>>({});
   const [secrets, setSecrets] = useState<Record<string, string>>({});
   const [msg, setMsg] = useState("");
+  // 卡片折叠偏好：用户手动切换后记入 localStorage；未手动切换时按是否已配置决定默认态
+  const readFoldPref = (p: string): boolean | undefined => {
+    try { const v = localStorage.getItem(`np-oauth-fold-${p}`); return v === null ? undefined : v === "1"; } catch { return undefined; }
+  };
+  const [foldPref, setFoldPref] = useState<Record<string, boolean | undefined>>(() => ({ github: readFoldPref("github"), qq: readFoldPref("qq") }));
+  const toggleFold = (p: string, collapsed: boolean) => {
+    const next = !collapsed;
+    setFoldPref((f) => ({ ...f, [p]: next }));
+    try { localStorage.setItem(`np-oauth-fold-${p}`, next ? "1" : "0"); } catch { /* ignore */ }
+  };
   const load = useCallback(() => {
     api.get<{ providers: typeof providers }>("/api/admin/oauth").then((d) => setProviders(d.providers)).catch(() => undefined);
   }, []);
@@ -325,9 +335,20 @@ function OauthSettings() {
     <div className="stack">
       {Object.entries(meta).map(([p, m]) => {
         const cfg = providers[p] || { enabled: false, clientId: "", hasSecret: false, callback: "" };
+        // 默认态：已填凭据（Client ID/App ID 有值）→ 收起；未配置 → 展开；用户手动切换覆盖默认
+        const collapsed = foldPref[p] ?? !!cfg.clientId;
+        const status = cfg.enabled ? "已启用" : cfg.clientId ? "未启用" : "未配置";
         return (
-          <div key={p} className="panel">
-            <h3>{m.label} 登录</h3>
+          <div key={p} className="panel oauth-card">
+            <button type="button" className="oauth-fold-head" aria-expanded={!collapsed} onClick={() => toggleFold(p, collapsed)}>
+              <span className="oauth-fold-title">{m.label} 登录</span>
+              <span className={`badge${cfg.enabled ? " badge-pin" : ""}`}>{status}</span>
+              <svg className={`cal-chevron${collapsed ? "" : " open"}`} width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+            <div className={`oauth-collapse${collapsed ? "" : " open"}`}>
+              <div className="oauth-collapse-inner">
             {p === "github" ? (
               <p className="muted tiny">在 {m.where} 创建 OAuth App，把下方回调地址填到应用的 Authorization callback URL，再把 {m.idLabel} 与{m.secretLabel}填回来。</p>
             ) : (
@@ -355,6 +376,8 @@ function OauthSettings() {
             <div className="btn-row">
               <button className="btn btn-primary" onClick={() => void save(p)}>保存{m.label}设置</button>
               <button className="btn btn-ghost" onClick={() => void test(p)}>测试配置</button>
+            </div>
+              </div>
             </div>
           </div>
         );
