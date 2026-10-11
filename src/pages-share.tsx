@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, bootSite, cacheSite, applyAccent, fmtTime, type NoteInfo, type SiteInfo } from "./api";
-import { Avatar, Lightbox, LocationBadge, WeatherBadge, imageHit } from "./components";
+import { Avatar, GithubIcon, Lightbox, LocationBadge, WeatherBadge, imageHit } from "./components";
 import { renderMarkdown } from "./md";
 
 // 独立分享页（/s/<token> 真实路径）与公开独白只读页（/n/<id>）：极简品牌行 + 笔记正文 + 页脚备案，无任何作者控件
@@ -89,6 +89,7 @@ export function SharePage({ token, noteId }: { token?: string; noteId?: number }
 
       <footer className="site-footer">
         <span>{site?.name || ""}{site?.subtitle ? ` · ${site.subtitle}` : ""}</span>
+        <a className="gh-link" href="https://github.com/wujinpai/notepro" target="_blank" rel="noopener noreferrer" aria-label="GitHub 项目地址" title="GitHub 项目地址"><GithubIcon /></a>
         {site?.footer && <span>{site.footer}</span>}
         {site?.icp && (
           <a className="icp-link" href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">{site.icp}</a>

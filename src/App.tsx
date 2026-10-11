@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, bootSite, cacheSite, syncFavicon, applyAccent, DEFAULT_ICON, type NoteInfo, type SiteInfo, type UserInfo } from "./api";
-import { AuthDialog, Avatar, MoonIcon, PenIcon, SearchIcon, SunIcon } from "./components";
+import { AuthDialog, Avatar, GithubIcon, MoonIcon, PenIcon, SearchIcon, SunIcon } from "./components";
 import { HomePage, NoteDetail, SiteDrawer } from "./pages-home";
 import { SharePage } from "./pages-share";
 import { EditorPage } from "./pages-editor";
@@ -39,6 +39,33 @@ function MenuIcon() {
   );
 }
 
+// ---- 首页滚动位置存档：离开首页时按筛选 key 存 scrollY，返回时恢复 ----
+// 模块变量 + sessionStorage 双存（刷新页面后返回也能恢复）
+const HOME_SCROLL_KEY = "notepro:home-scroll";
+let homeScrollMem: { key: string; y: number } | null = null;
+function saveHomeScroll(key: string, y: number) {
+  homeScrollMem = { key, y };
+  try { sessionStorage.setItem(HOME_SCROLL_KEY, JSON.stringify(homeScrollMem)); } catch { /* ignore */ }
+}
+function readHomeScroll(key: string): number | null {
+  if (homeScrollMem && homeScrollMem.key === key) return homeScrollMem.y;
+  try {
+    const raw = sessionStorage.getItem(HOME_SCROLL_KEY);
+    if (raw) {
+      const d = JSON.parse(raw) as { key: string; y: number };
+      if (d && d.key === key && typeof d.y === "number") { homeScrollMem = d; return d.y; }
+    }
+  } catch { /* ignore */ }
+  return null;
+}
+function clearHomeScroll() {
+  homeScrollMem = null;
+  try { sessionStorage.removeItem(HOME_SCROLL_KEY); } catch { /* ignore */ }
+}
+function hashIsHome(h: string): boolean {
+  return !/^#note\/\d+$/.test(h) && h !== "#edit" && !/^#edit\/\d+$/.test(h) && !h.startsWith("#me") && !h.startsWith("#admin");
+}
+
 export default function App() {
   const { theme, toggle } = useTheme();
   // 初始站点信息来自服务端注入/本地缓存，未就绪时 name 留空：品牌区只渲染中性占位，不闪默认「己素」与蓝 N
@@ -59,6 +86,21 @@ export default function App() {
   const [q, setQ] = useState("");
   const [tagFilter, setTagFilter] = useState("");
   const [dateFilter, setDateFilter] = useState("");
+  // 过滤变化（搜索/标签/日期）：清掉首页滚动存档并回到顶部
+  const setQf = (v: string) => { setQ(v); clearHomeScroll(); window.scrollTo(0, 0); };
+  const setTagFilterf = (t: string) => { setTagFilter(t); clearHomeScroll(); window.scrollTo(0, 0); };
+  const setDateFilterf = (d: string) => { setDateFilter(d); clearHomeScroll(); window.scrollTo(0, 0); };
+  // 返回首页时的滚动恢复：路由切换处设置，HomePage 列表渲染后通过 onListSettled 消费
+  const isHomeRef = useRef(hashIsHome(location.hash));
+  const filterKeyRef = useRef("");
+  const pendingRestoreRef = useRef<number | null>(null);
+  filterKeyRef.current = `${tagFilter}|${q}|${dateFilter}`;
+  const handleListSettled = useCallback(() => {
+    const y = pendingRestoreRef.current;
+    if (y == null) return;
+    pendingRestoreRef.current = null;
+    requestAnimationFrame(() => requestAnimationFrame(() => { window.scrollTo(0, y); }));
+  }, []);
   const [calMonth, setCalMonth] = useState(() => { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}`; });
   const [calDays, setCalDays] = useState<Record<string, number>>({});
   const [allTags, setAllTags] = useState<{ name: string; count: number }[]>([]);
@@ -105,7 +147,23 @@ export default function App() {
   }, [refreshUser]);
 
   useEffect(() => {
-    const onHash = () => { setRoute(location.hash); setMenuOpen(false); setDrawerOpen(false); setSearchOpen(false); window.scrollTo(0, 0); };
+    const onHash = () => {
+      const h = location.hash;
+      // 离开首页：按当前筛选 key 存档滚动位置；浏览器前进/后退同样走这里
+      if (isHomeRef.current) saveHomeScroll(filterKeyRef.current, window.scrollY);
+      setRoute(h); setMenuOpen(false); setDrawerOpen(false); setSearchOpen(false);
+      const nowHome = hashIsHome(h);
+      isHomeRef.current = nowHome;
+      if (nowHome) {
+        const y = readHomeScroll(filterKeyRef.current);
+        pendingRestoreRef.current = y;
+        // 有存档则等 HomePage 列表渲染后恢复；无存档回顶部
+        if (y == null) window.scrollTo(0, 0);
+      } else {
+        pendingRestoreRef.current = null;
+        window.scrollTo(0, 0);
+      }
+    };
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
@@ -174,8 +232,8 @@ export default function App() {
   // 抽屉已提升到 App 层：任何主页面点汉堡只开抽屉、停留在当前页，不再强制跳首页
   const openDrawer = () => setDrawerOpen(true);
   // 抽屉里点日期/标签：先设置过滤，非首页再带回首页看结果；已在首页则原地过滤（抽屉随之关闭）
-  const pickDateAndGo = (d: string) => { setDateFilter(d); setDrawerOpen(false); if (!isHome) go("#"); };
-  const pickTagAndGo = (t: string) => { setTagFilter(t); setDrawerOpen(false); if (!isHome) go("#"); };
+  const pickDateAndGo = (d: string) => { setDateFilterf(d); setDrawerOpen(false); if (!isHome) go("#"); };
+  const pickTagAndGo = (t: string) => { setTagFilterf(t); setDrawerOpen(false); if (!isHome) go("#"); };
   // 抽屉内改动过搜索词后关闭：非首页带回首页看搜索结果
   const drawerSearchCommit = () => { if (!isHome) go("#"); };
   const toggleSearch = () => {
@@ -240,9 +298,9 @@ export default function App() {
           <div className="search-bar">
             <span className="search-bar-ic"><SearchIcon /></span>
             <input ref={searchRef} value={q} placeholder="搜索标题或正文…" aria-label="搜索标题或正文"
-              onChange={(e) => setQ(e.target.value)}
+              onChange={(e) => setQf(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Escape") setSearchOpen(false); }} />
-            {q && <button type="button" className="icon-btn search-clear" aria-label="清除搜索" onClick={() => setQ("")}>✕</button>}
+            {q && <button type="button" className="icon-btn search-clear" aria-label="清除搜索" onClick={() => setQf("")}>✕</button>}
           </div>
         )}
       </header>
@@ -258,14 +316,14 @@ export default function App() {
             : !editLoaded ? <div className="empty">加载中…</div>
             : <EditorPage key={editNote?.id || "new"} note={editNote} onCancel={() => go("#")} onSaved={(n) => go(`#note/${n.id}`)} />
         ) : noteId ? (
-          <NoteDetail noteId={Number(noteId)} user={user} onBack={() => go("#")} onEdit={openEdit} onDeleted={() => go("#")}
+          <NoteDetail noteId={Number(noteId)} user={user} site={site} onBack={() => go("#")} onEdit={openEdit} onDeleted={() => go("#")}
             focusComments={commentFocus === Number(noteId)} onAuthRequest={() => setAuthOpen(true)}
-            onTag={(t) => { setTagFilter(t); go("#"); }} />
+            onTag={(t) => { setTagFilterf(t); go("#"); }} />
         ) : (
           <HomePage user={user} site={site} onOpenNote={openNote} onComment={openComment}
-            q={q} onSearch={setQ}
-            tag={tagFilter} onTag={setTagFilter} date={dateFilter} onDate={setDateFilter}
-            month={calMonth} onMonth={setCalMonth} days={calDays} tags={allTags} />
+            q={q} onSearch={setQf}
+            tag={tagFilter} onTag={setTagFilterf} date={dateFilter} onDate={setDateFilterf}
+            month={calMonth} onMonth={setCalMonth} days={calDays} tags={allTags} onListSettled={handleListSettled} />
         )}
       </main>
 
@@ -274,12 +332,13 @@ export default function App() {
         site={site} user={user} theme={theme} onToggleTheme={toggle}
         onLogout={() => void logout()} onOpenAuth={() => setAuthOpen(true)}
         onHome={() => { if (!isHome) go("#"); }}
-        q={q} onSearch={setQ} onSearchCommit={drawerSearchCommit}
+        q={q} onSearch={setQf} onSearchCommit={drawerSearchCommit}
         tags={allTags} tag={tagFilter} onPickTag={pickTagAndGo}
         month={calMonth} days={calDays} date={dateFilter} onMonth={setCalMonth} onPickDate={pickDateAndGo} />
 
       <footer className="site-footer">
         <span>{site.name}{site.subtitle ? ` · ${site.subtitle}` : ""}</span>
+        <a className="gh-link" href="https://github.com/wujinpai/notepro" target="_blank" rel="noopener noreferrer" aria-label="GitHub 项目地址" title="GitHub 项目地址"><GithubIcon /></a>
         {site.footer && <span>{site.footer}</span>}
         {site.icp && <a className="icp-link" href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">{site.icp}</a>}
       </footer>

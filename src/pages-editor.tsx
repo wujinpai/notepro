@@ -182,29 +182,50 @@ export function EditorPage({ note, onSaved, onCancel }: {
       (pos) => {
         const lat = pos.coords.latitude.toFixed(4);
         const lon = pos.coords.longitude.toFixed(4);
-        void Promise.all([
-          fetch(`https://api-bdc.io/data/reverse-geocode-client?latitude=${lat}&longitude=${lon}&localityLanguage=zh`)
-            .then((r) => { if (!r.ok) throw new Error("geo"); return r.json(); }),
-          fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,weather_code`)
-            .then((r) => { if (!r.ok) throw new Error("wx"); return r.json(); }),
-        ]).then(([g, w]) => {
-          // 位置：优先行政层级 6（区/县，名字原样保留，如"郫都区"）→ 5（地级市，去尾"市"，如"成都市"→"成都"）
-          // → 兜底 locality → city → principalSubdivision（省，仅在更细层级都没有时用）。
-          // BigDataCloud adminLevel 实测：2 国家 / 4 省或直辖市 / 5 地级市 / 6 区县 / 7 街道或开发区 / 8 社区
-          const admins: { adminLevel?: number; name?: string }[] = g?.localityInfo?.administrative || [];
-          const lvl6 = admins.find((a) => a.adminLevel === 6)?.name || "";
-          const lvl5 = admins.find((a) => a.adminLevel === 5)?.name || "";
-          let loc: string;
-          let cityLevel: boolean;
-          if (lvl6) { loc = lvl6; cityLevel = false; }
-          else if (lvl5) { loc = lvl5; cityLevel = true; }
-          else { loc = String(g?.locality || g?.city || g?.principalSubdivision || ""); cityLevel = true; }
-          loc = loc.replace(/區/g, "区"); // 接口 zh 偶有繁体"區"，统一简体
-          if (cityLevel) loc = loc.replace(/市$/, ""); // 市级及兜底去尾"市"；区/县名原样保留
+        // 位置：先走自家 /api/geo/reverse（已配置腾讯 Key 则用其逆地理），失败静默回退 BigDataCloud
+        const geoP: Promise<string> = api
+          .get<{ ok: boolean; label?: string }>(`/api/geo/reverse?lat=${lat}&lon=${lon}`)
+          .then((d) => {
+            if (d && d.ok && d.label) return d.label;
+            throw new Error("tx");
+          })
+          .catch(() => fetch(`https://api-bdc.io/data/reverse-geocode-client?latitude=${lat}&longitude=${lon}&localityLanguage=zh`)
+            .then((r) => { if (!r.ok) throw new Error("geo"); return r.json(); })
+            .then((g: { localityInfo?: { administrative?: { adminLevel?: number; name?: string }[] }; locality?: string; city?: string; principalSubdivision?: string }) => {
+              // 位置：优先行政层级 6（区/县，名字原样保留，如"郫都区"）→ 5（地级市，去尾"市"，如"成都市"→"成都"）
+              // → 兜底 locality → city → principalSubdivision（省，仅在更细层级都没有时用）。
+              // BigDataCloud adminLevel 实测：2 国家 / 4 省或直辖市 / 5 地级市 / 6 区县 / 7 街道或开发区 / 8 社区
+              const admins = g?.localityInfo?.administrative || [];
+              const lvl6 = admins.find((a) => a.adminLevel === 6)?.name || "";
+              const lvl5 = admins.find((a) => a.adminLevel === 5)?.name || "";
+              let loc: string;
+              let cityLevel: boolean;
+              if (lvl6) { loc = lvl6; cityLevel = false; }
+              else if (lvl5) { loc = lvl5; cityLevel = true; }
+              else { loc = String(g?.locality || g?.city || g?.principalSubdivision || ""); cityLevel = true; }
+              loc = loc.replace(/區/g, "区"); // 接口 zh 偶有繁体"區"，统一简体
+              if (cityLevel) loc = loc.replace(/市$/, ""); // 市级及兜底去尾"市"；区/县名原样保留
+              return loc;
+            }));
+        // 天气：先走自家 /api/weather/current（已配置和风 KEY 则用其实况），失败静默回退 Open-Meteo
+        const wxP: Promise<{ desc: string; temp?: number }> = api
+          .get<{ ok: boolean; desc?: string; temp?: number }>(`/api/weather/current?lat=${lat}&lon=${lon}`)
+          .then((d) => {
+            if (d && d.ok && d.desc) return { desc: d.desc, temp: typeof d.temp === "number" ? d.temp : undefined };
+            throw new Error("qw");
+          })
+          .catch(() => fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,weather_code`)
+            .then((r) => { if (!r.ok) throw new Error("wx"); return r.json(); })
+            .then((w: { current?: { weather_code?: number; temperature_2m?: number } }) => {
+              const desc = wmoToZh(w?.current?.weather_code);
+              if (!desc) throw new Error("wx");
+              const temp = w?.current?.temperature_2m;
+              return { desc, temp: typeof temp === "number" ? temp : undefined };
+            }));
+        void Promise.all([geoP, wxP]).then(([loc, w]) => {
           if (loc) setLocation((v) => v || loc);
-          const code = w?.current?.weather_code;
-          const temp = w?.current?.temperature_2m;
-          const desc = wmoToZh(code);
+          const desc = w.desc;
+          const temp = w.temp;
           if (desc && typeof temp === "number") setWeather((v) => v || `${desc} ${Math.round(temp)}°C`);
           else if (desc) setWeather((v) => v || desc);
           if (!loc && !desc) setGeoMsg("获取失败，请手动填写");

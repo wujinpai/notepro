@@ -45,6 +45,17 @@ export function decryptSecret(stored: string): string {
   }
 }
 
+// ---- 腾讯位置服务逆地理 address_component 解析：district（区县原样）→ city（去尾"市"）→ province ----
+export function parseTencentAddressComponent(ac: { province?: string; city?: string; district?: string } | null | undefined): { district: string; city: string; province: string; label: string } | null {
+  if (!ac) return null;
+  const district = String(ac.district || "").replace(/區/g, "区");
+  const city = String(ac.city || "").replace(/市$/, "");
+  const province = String(ac.province || "");
+  const label = district || city || province;
+  if (!label) return null;
+  return { district, city, province, label };
+}
+
 // ---- 签名（OAuth state / cookie）----
 export function sign(data: string): string {
   return createHash("sha256").update(effectiveSecret + "|" + data).digest("hex").slice(0, 32);

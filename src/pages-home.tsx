@@ -49,7 +49,7 @@ export function Calendar({ month, days, selected, onMonth, onSelect }: {
 let feedCache: { key: string; notes: NoteInfo[]; total: number } | null = null;
 const feedKey = (page: number, tag: string, q: string, date: string) => `${page}|${tag}|${q}|${date}`;
 
-export function HomePage({ user, site, onOpenNote, onComment, q, onSearch, tag, onTag, date, onDate, month, onMonth, days, tags }: {  user: UserInfo | null; site: SiteInfo; onOpenNote: (n: NoteInfo) => void;
+export function HomePage({ user, site, onOpenNote, onComment, q, onSearch, tag, onTag, date, onDate, month, onMonth, days, tags, onListSettled }: {  user: UserInfo | null; site: SiteInfo; onOpenNote: (n: NoteInfo) => void;
   onComment: (n: NoteInfo) => void;
   q: string; onSearch: (v: string) => void;
   // 标签/日期过滤与日历数据由 App 层持有（抽屉与桌面侧栏共用同一份状态）
@@ -57,6 +57,7 @@ export function HomePage({ user, site, onOpenNote, onComment, q, onSearch, tag, 
   date: string; onDate: (d: string) => void;
   month: string; onMonth: (m: string) => void;
   days: Record<string, number>; tags: { name: string; count: number }[];
+  onListSettled?: () => void;
 }) {
   const [page, setPage] = useState(1);
   const key = feedKey(page, tag, q, date);
@@ -115,6 +116,16 @@ export function HomePage({ user, site, onOpenNote, onComment, q, onSearch, tag, 
   }, [load]);
 
   const [calOpen, setCalOpen] = useState(false);
+
+  // 列表渲染就绪通知 App：返回首页时借此恢复离开前的滚动位置（每 key 只通知一次）
+  const settledKeyRef = useRef("");
+  useEffect(() => {
+    if (!onListSettled) return;
+    if (((settled && !loading) || notes.length > 0) && settledKeyRef.current !== key) {
+      settledKeyRef.current = key;
+      onListSettled();
+    }
+  }, [settled, loading, notes.length, key, onListSettled]);
 
   return (
     <div className="home-layout">
@@ -328,8 +339,8 @@ export function SiteDrawer({ open, onClose, site, user, theme, onToggleTheme, on
   );
 }
 
-export function NoteDetail({ noteId, user, onBack, onEdit, onDeleted, focusComments, onAuthRequest, onTag }: {
-  noteId: number; user: UserInfo | null; onBack: () => void;
+export function NoteDetail({ noteId, user, site, onBack, onEdit, onDeleted, focusComments, onAuthRequest, onTag }: {
+  noteId: number; user: UserInfo | null; site: SiteInfo; onBack: () => void;
   onEdit: (n: NoteInfo) => void; onDeleted: () => void;
   focusComments: boolean; onAuthRequest: () => void; onTag?: (t: string) => void;
 }) {
@@ -389,7 +400,7 @@ export function NoteDetail({ noteId, user, onBack, onEdit, onDeleted, focusComme
           {mine && <button className="btn btn-danger" onClick={() => void del()}>删除</button>}
         </span>
       </div>
-      {shareOpen && <ShareDialog note={note} onClose={() => setShareOpen(false)} />}
+      {shareOpen && <ShareDialog note={note} brand={site.subtitle ? `${site.name} · ${site.subtitle}` : site.name} onClose={() => setShareOpen(false)} />}
       {note.allowComments && <CommentsSection note={note} user={user} focus={focusComments} onAuthRequest={onAuthRequest} />}
     </article>
   );

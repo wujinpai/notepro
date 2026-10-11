@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
+import { toPng } from "html-to-image";
 import { api, fmtTime, type NoteInfo, type SiteInfo, type UserInfo } from "./api";
 import { excerpt, imagesOf } from "./md";
 
@@ -75,6 +76,15 @@ export function PinIcon() {
     <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" focusable="false" {...line}>
       <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z" />
       <circle cx="12" cy="10" r="3" />
+    </svg>
+  );
+}
+
+export function GithubIcon({ size = 16 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true" focusable="false" {...line}>
+      <path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4" />
+      <path d="M9 18c-4.51 2-5-2-7-2" />
     </svg>
   );
 }
@@ -410,15 +420,20 @@ export function AuthDialog({ site, onClose, onAuthed }: { site: SiteInfo; onClos
   );
 }
 
-// ---------- 分享弹窗（链接 + 二维码，作者可重置） ----------
+// ---------- 分享弹窗：链接 + 卡片海报（含右下角二维码） + 保存图片 ----------
 export interface ShareInfo { token: string; url: string; isAuthor: boolean }
-export function ShareDialog({ note, onClose }: { note: NoteInfo; onClose: () => void }) {
+export function ShareDialog({ note, brand, onClose }: { note: NoteInfo; brand?: string; onClose: () => void }) {
   const [info, setInfo] = useState<ShareInfo | null>(null);
   const [qr, setQr] = useState("");
+  const [posterPng, setPosterPng] = useState("");
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [genMsg, setGenMsg] = useState("");
+  const [saveBusy, setSaveBusy] = useState(false);
+  const [saveMsg, setSaveMsg] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+  const posterRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let dead = false;
@@ -432,6 +447,40 @@ export function ShareDialog({ note, onClose }: { note: NoteInfo; onClose: () => 
     if (!info) { setQr(""); return; }
     QRCode.toDataURL(info.url, { width: 220, margin: 1 }).then(setQr).catch(() => setQr(""));
   }, [info]);
+
+  // 海报生成：二维码就绪且隐藏海报 DOM 挂载后，用 html-to-image 导出 2x PNG
+  useEffect(() => {
+    if (!qr) return;
+    let dead = false;
+    setGenMsg(""); setPosterPng(""); setSaveMsg("");
+    const node = posterRef.current;
+    if (!node) return;
+    const waitImgs = async () => {
+      const imgs = Array.from(node.querySelectorAll("img"));
+      await Promise.all(imgs.map((img) => {
+        const el = img as HTMLImageElement;
+        if (el.complete && el.naturalWidth > 0) return Promise.resolve();
+        return new Promise<void>((res) => {
+          const done = () => res();
+          el.addEventListener("load", done, { once: true });
+          el.addEventListener("error", done, { once: true });
+          setTimeout(done, 3000);
+        });
+      }));
+    };
+    (async () => {
+      try {
+        await waitImgs();
+        try { await (document as Document).fonts?.ready; } catch { /* ignore */ }
+        await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+        const url = await toPng(node, { pixelRatio: 2, cacheBust: true });
+        if (!dead) setPosterPng(url);
+      } catch {
+        if (!dead) setGenMsg("海报生成失败，请关闭重试");
+      }
+    })();
+    return () => { dead = true; };
+  }, [qr]);
 
   const copy = async () => {
     if (!info) return;
@@ -449,26 +498,99 @@ export function ShareDialog({ note, onClose }: { note: NoteInfo; onClose: () => 
     } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
   };
 
+  const savePoster = async () => {
+    if (!posterPng || saveBusy) return;
+    setSaveBusy(true); setSaveMsg("");
+    try {
+      const blob = await (await fetch(posterPng)).blob();
+      const file = new File([blob], `note-${note.id}.png`, { type: "image/png" });
+      const nav = navigator as Navigator & { canShare?: (d: { files: File[] }) => boolean; share?: (d: { files: File[] }) => Promise<void> };
+      if (nav.canShare?.({ files: [file] })) {
+        await nav.share?.({ files: [file] });
+        return;
+      }
+      throw new Error("no-share");
+    } catch (e) {
+      if ((e as Error)?.name === "AbortError") return; // 用户取消了系统分享
+      try {
+        const a = document.createElement("a");
+        a.href = posterPng; a.download = `note-${note.id}.png`;
+        document.body.appendChild(a); a.click(); a.remove();
+        setSaveMsg("已开始下载");
+      } catch {
+        window.open(posterPng, "_blank");
+        setSaveMsg("已在新标签页打开，长按图片保存");
+      }
+    } finally {
+      setSaveBusy(false);
+    }
+  };
+
+  const imgs = imagesOf(note.content).slice(0, 9);
+  const hideImg = (e: React.SyntheticEvent<HTMLImageElement>) => { (e.target as HTMLImageElement).style.display = "none"; };
+
   return (
     <Modal title="分享" onClose={onClose}>
       {error && <p className="err-text">{error}</p>}
       {!info && !error && <p className="muted">正在生成分享链接…</p>}
       {info && (
         <>
+          <div className="share-poster-wrap">
+            {posterPng ? (
+              <img className="share-poster-preview" src={posterPng} alt="分享海报预览" />
+            ) : (
+              <div className="share-poster-loading" role="status">{genMsg || "海报生成中…"}</div>
+            )}
+          </div>
+          <button type="button" className="btn btn-primary btn-block" disabled={!posterPng || saveBusy} onClick={() => void savePoster()}>
+            {saveBusy ? "保存中…" : !posterPng ? "生成中…" : "保存图片"}
+          </button>
+          {saveMsg && <p className="ok-text">{saveMsg}</p>}
           <div className="share-link-row">
             <input ref={inputRef} readOnly value={info.url} aria-label="分享链接" onFocus={(e) => e.target.select()} />
             <button type="button" className="btn btn-ghost" onClick={() => void copy()}>{copied ? "已复制" : "复制"}</button>
           </div>
-          {qr && (
-            <div className="share-qr">
-              <img src={qr} alt="分享二维码" />
-              <span className="muted tiny">扫码打开这篇独白</span>
-            </div>
-          )}
           <div className="share-foot-row">
             <span className="muted tiny">任何人凭此链接可查看{note.visibility === "private" ? "这篇私密独白" : "这篇独白"}</span>
             {info.isAuthor && <button type="button" className="btn btn-danger btn-sm" disabled={busy} onClick={() => void reset()}>重置链接</button>}
           </div>
+          {/* 隐藏的海报捕获节点：750px 固定宽、屏外渲染，2x 导出 */}
+          {qr && (
+            <div ref={posterRef} className="poster-capture" aria-hidden="true">
+              <div className="poster">
+                <div className="poster-head">
+                  <Avatar url={note.author?.avatar || ""} name={note.author?.nickname || "用户"} size={96} />
+                  <div className="poster-meta">
+                    <strong>{note.author?.nickname || "用户"}</strong>
+                    <span>@{note.author?.username} · {fmtTime(note.createdAt)}</span>
+                  </div>
+                </div>
+                {(note.weather || note.location) && (
+                  <div className="poster-env">
+                    {note.weather && <WeatherBadge text={note.weather} />}
+                    {note.location && <LocationBadge text={note.location} />}
+                  </div>
+                )}
+                {note.title && <h3 className="poster-title">{note.title}</h3>}
+                {excerpt(note.content, 300) && <p className="poster-excerpt" dangerouslySetInnerHTML={{ __html: excerpt(note.content, 300) }} />}
+                {imgs.length > 0 && (
+                  <div className={`poster-imgs cols-${imgs.length === 1 ? 1 : imgs.length <= 4 ? 2 : 3}`}>
+                    {imgs.map((src, i) => <img key={i} src={src} alt="" onError={hideImg} />)}
+                  </div>
+                )}
+                {note.tags.length > 0 && (
+                  <div className="poster-tags">{note.tags.map((t) => <span key={t} className="poster-chip">#{t}</span>)}</div>
+                )}
+                <div className="poster-foot">
+                  <span className="poster-brand">{brand || "己素 · 笔墨留香"}</span>
+                  <div className="poster-qr">
+                    <img src={qr} alt="" onError={hideImg} />
+                    <span>扫码打开这篇独白</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </>
       )}
     </Modal>

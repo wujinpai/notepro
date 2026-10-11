@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, readFileSync, unlinkSync, copyFileSync, writeFil
 import { join, extname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { db, getSetting, setSetting, DATA_DIR, DB_PATH } from "./db.js";
-import { hashPassword, verifyPassword, sha256, encryptSecret, verifyPayload, signPayload, maskEmail, randomToken } from "./util.js";
+import { hashPassword, verifyPassword, sha256, encryptSecret, decryptSecret, verifyPayload, signPayload, maskEmail, randomToken, parseTencentAddressComponent } from "./util.js";
 import { sendEmailCode, verifyEmailCode, createSliderChallenge, verifySlider, consumeTicket, getSmtpConfig, sendMail } from "./mail.js";
 import {
   getUserById, getUserByUsername, getUserByEmail, publicUser, createSession, setSessionCookie, clearSessionCookie,
@@ -780,6 +780,113 @@ app.post("/api/admin/smtp/test", requireAdmin, async (req, res) => {
   const r = await sendMail(to, `${cfg.fromName || getSetting("site_name", "己素")} · 测试邮件`, "这是一封 SMTP 配置测试邮件，收到即表示发信配置可用。");
   if (!r.ok) return fail(res, 502, `测试邮件发送失败：${r.error}`);
   ok(res, { to });
+});
+
+// ---- 天气与位置设置（和风天气 KEY + 腾讯位置服务 KEY，AES-256-GCM 加密存储，接口永不回显明文） ----
+app.get("/api/admin/geo", requireAdmin, (_req, res) => {
+  ok(res, {
+    weather: { enabled: getSetting("weather_enabled") === "1", hasKey: !!getSetting("weather_qweather_key_enc") },
+    geo: { enabled: getSetting("geo_enabled") === "1", hasKey: !!getSetting("geo_qq_key_enc") },
+  });
+});
+app.put("/api/admin/geo", requireAdmin, (req, res) => {
+  const b = req.body || {};
+  if (b.weather) {
+    setSetting("weather_enabled", b.weather.enabled === false ? "0" : "1");
+    if (b.weather.clearKey) setSetting("weather_qweather_key_enc", "");
+    else if (b.weather.key) setSetting("weather_qweather_key_enc", encryptSecret(String(b.weather.key).trim().slice(0, 80)));
+  }
+  if (b.geo) {
+    setSetting("geo_enabled", b.geo.enabled === false ? "0" : "1");
+    if (b.geo.clearKey) setSetting("geo_qq_key_enc", "");
+    else if (b.geo.key) setSetting("geo_qq_key_enc", encryptSecret(String(b.geo.key).trim().slice(0, 80)));
+  }
+  ok(res, {
+    weather: { hasKey: !!getSetting("weather_qweather_key_enc") },
+    geo: { hasKey: !!getSetting("geo_qq_key_enc") },
+  });
+});
+
+// 和风实况：只读设置、不打日志、不回显 key
+async function qweatherNow(lat: number, lon: number): Promise<{ desc: string; temp: number } | { qerror: string }> {
+  const key = decryptSecret(getSetting("weather_qweather_key_enc"));
+  if (!key) return { qerror: "未配置 API KEY" };
+  if (getSetting("weather_enabled") !== "1") return { qerror: "天气服务未启用" };
+  let status = 0, d: any = null;
+  try {
+    const r = await fetch(`https://devapi.qweather.com/v7/weather/now?location=${lon.toFixed(2)},${lat.toFixed(2)}&key=${encodeURIComponent(key)}`, { signal: AbortSignal.timeout(8000) });
+    status = r.status;
+    const text = await r.text();
+    try { d = text.trim() ? JSON.parse(text) : null; } catch { d = null; }
+  } catch {
+    return { qerror: "请求和风接口失败（网络或超时）" };
+  }
+  if (status === 200 && d?.code === "200" && d?.now) {
+    const temp = Number(d.now.temp);
+    return { desc: String(d.now.text || ""), temp: Number.isFinite(temp) ? temp : NaN };
+  }
+  // 和风异常形态：HTTP 4xx/5xx + {error:{title,detail}}，或 200 + {code:"4xx"}
+  const ej = d?.error;
+  if (ej) return { qerror: `和风返回 ${ej.status ?? status}（${ej.title || ej.detail || "未知错误"}）` };
+  const codeMsg: Record<string, string> = {
+    "400": "请求错误", "401": "key 无效或无权限", "402": "超过访问次数", "403": "无访问权限",
+    "404": "位置不存在", "429": "访问过于频繁", "500": "和风服务异常",
+  };
+  const code = d?.code ?? `HTTP ${status}`;
+  return { qerror: `和风返回 ${code}${codeMsg[d?.code ?? ""] ? `（${codeMsg[d?.code ?? ""]}）` : ""}` };
+}
+// 编辑器自动获取：有 key 走和风实况，否则 503 由客户端回退 Open-Meteo（登录态，防额度滥用）
+app.get("/api/weather/current", requireAuth, async (req, res) => {
+  const lat = Number(req.query.lat), lon = Number(req.query.lon);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) return fail(res, 400, "坐标无效");
+  const r = await qweatherNow(lat, lon);
+  if ("qerror" in r) return res.status(503).json({ ok: false });
+  ok(res, { desc: r.desc, temp: r.temp });
+});
+app.post("/api/admin/geo/test-weather", requireAdmin, async (req, res) => {
+  const lat = Number(req.body?.lat), lon = Number(req.body?.lon);
+  const r = await qweatherNow(Number.isFinite(lat) ? lat : 39.9042, Number.isFinite(lon) ? lon : 116.4074);
+  if ("qerror" in r) return ok(res, { ok: false, error: r.qerror });
+  ok(res, { ok: true, desc: r.desc, temp: r.temp });
+});
+
+// 腾讯位置服务逆地理：只读设置、不打日志、不回显 key
+// TENCENT_GEO_API 仅用于测试时指向本地 stub，默认走官方域名
+const TENCENT_GEO_API = process.env.TENCENT_GEO_API || "https://apis.map.qq.com";
+async function tencentReverse(lat: number, lon: number): Promise<{ district: string; city: string; province: string; label: string } | { qerror: string }> {
+  const key = decryptSecret(getSetting("geo_qq_key_enc"));
+  if (!key) return { qerror: "未配置 Key" };
+  if (getSetting("geo_enabled") !== "1") return { qerror: "位置服务未启用" };
+  let status = 0, d: any = null;
+  try {
+    const r = await fetch(`${TENCENT_GEO_API}/ws/geocoder/v1/?location=${lat.toFixed(5)},${lon.toFixed(5)}&key=${encodeURIComponent(key)}&get_poi=0`, { signal: AbortSignal.timeout(8000) });
+    status = r.status;
+    const text = await r.text();
+    try { d = text.trim() ? JSON.parse(text) : null; } catch { d = null; }
+  } catch {
+    return { qerror: "请求腾讯位置服务失败（网络或超时）" };
+  }
+  const ac = d?.result?.address_component;
+  if (d?.status === 0) {
+    const p = parseTencentAddressComponent(ac);
+    if (p) return p;
+    return { qerror: "未解析到有效地址" };
+  }
+  return { qerror: `腾讯返回 ${d?.status ?? ("HTTP " + status)}${d?.message ? `（${d.message}）` : ""}` };
+}
+// 编辑器自动获取：有腾讯 key 走其逆地理，否则 503 由客户端回退 BigDataCloud（登录态，防额度滥用）
+app.get("/api/geo/reverse", requireAuth, async (req, res) => {
+  const lat = Number(req.query.lat), lon = Number(req.query.lon);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) return fail(res, 400, "坐标无效");
+  const r = await tencentReverse(lat, lon);
+  if ("qerror" in r) return res.status(503).json({ ok: false });
+  ok(res, { ...r });
+});
+app.post("/api/admin/geo/test-geo", requireAdmin, async (req, res) => {
+  // 固定用达州坐标验证 key 可用性与解析口径
+  const r = await tencentReverse(31.21, 107.47);
+  if ("qerror" in r) return ok(res, { ok: false, error: r.qerror });
+  ok(res, { ok: true, ...r });
 });
 
 app.get("/api/admin/oauth", requireAdmin, (req, res) => {

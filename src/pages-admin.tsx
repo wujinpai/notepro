@@ -2,11 +2,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api, fmtTime, type NoteInfo, type UserInfo } from "./api";
 import { Avatar } from "./components";
 
-type AdminTab = "overview" | "users" | "notes" | "site" | "smtp" | "oauth";
+type AdminTab = "overview" | "users" | "notes" | "site" | "smtp" | "oauth" | "weather";
 
 export function AdminPage({ user, embedded = false }: { user: UserInfo; embedded?: boolean }) {
   const [tab, setTab] = useState<AdminTab>("overview");
-  const tabs: [AdminTab, string][] = [["overview", "概览"], ["users", "用户管理"], ["notes", "内容管理"], ["site", "站点设置"], ["smtp", "邮箱设置"], ["oauth", "第三方登录"]];
+  const tabs: [AdminTab, string][] = [["overview", "概览"], ["users", "用户管理"], ["notes", "内容管理"], ["site", "站点设置"], ["smtp", "邮箱设置"], ["oauth", "第三方登录"], ["weather", "天气与位置"]];
   const content = (
     <>
       {tab === "overview" && <Overview />}
@@ -15,6 +15,7 @@ export function AdminPage({ user, embedded = false }: { user: UserInfo; embedded
       {tab === "site" && <SiteSettings />}
       {tab === "smtp" && <SmtpSettings />}
       {tab === "oauth" && <OauthSettings />}
+      {tab === "weather" && <GeoWeatherSettings />}
     </>
   );
   // 嵌入用户中心：不再套一层 me-layout，只留子标签行 + 内容（外层导航由用户中心承担）
@@ -290,6 +291,112 @@ function SmtpSettings() {
   );
 }
 
+function GeoWeatherSettings() {
+  const [w, setW] = useState({ enabled: true, hasKey: false });
+  const [g, setG] = useState({ enabled: true, hasKey: false });
+  const [wKey, setWKey] = useState("");
+  const [gKey, setGKey] = useState("");
+  const [wMsg, setWMsg] = useState("");
+  const [gMsg, setGMsg] = useState("");
+  const [wTesting, setWTesting] = useState(false);
+  const [gTesting, setGTesting] = useState(false);
+  const [foldPref, setFoldPref] = useState<boolean | undefined>(() => {
+    try { const v = localStorage.getItem("np-weather-fold"); return v === null ? undefined : v === "1"; } catch { return undefined; }
+  });
+  const [folded, setFolded] = useState(true);
+  useEffect(() => {
+    api.get<{ weather: { enabled: boolean; hasKey: boolean }; geo: { enabled: boolean; hasKey: boolean } }>("/api/admin/geo").then((d) => {
+      setW(d.weather); setG(d.geo);
+      if (foldPref === undefined) setFolded(d.weather.hasKey || d.geo.hasKey);
+    }).catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const collapsed = foldPref ?? folded;
+  const toggle = () => {
+    const next = !collapsed;
+    setFoldPref(next);
+    try { localStorage.setItem("np-weather-fold", next ? "1" : "0"); } catch { /* ignore */ }
+  };
+  const status = (w.enabled && w.hasKey) || (g.enabled && g.hasKey) ? "已启用" : (w.hasKey || g.hasKey) ? "未启用" : "未配置";
+  const saveW = async (clear = false) => {
+    try {
+      const d = await api.put<{ weather: { hasKey: boolean } }>("/api/admin/geo", clear ? { weather: { enabled: w.enabled, clearKey: true } } : { weather: { enabled: w.enabled, key: wKey || undefined } });
+      setWKey(""); setW((s) => ({ ...s, hasKey: d.weather.hasKey }));
+      setWMsg(clear ? "和风 KEY 已清空，未配置时自动获取回退 Open-Meteo" : "天气设置已保存并即时生效");
+    } catch (e) { setWMsg((e as Error).message); }
+  };
+  const saveG = async (clear = false) => {
+    try {
+      const d = await api.put<{ geo: { hasKey: boolean } }>("/api/admin/geo", clear ? { geo: { enabled: g.enabled, clearKey: true } } : { geo: { enabled: g.enabled, key: gKey || undefined } });
+      setGKey(""); setG((s) => ({ ...s, hasKey: d.geo.hasKey }));
+      setGMsg(clear ? "腾讯 Key 已清空，未配置时自动获取回退 BigDataCloud" : "位置设置已保存并即时生效");
+    } catch (e) { setGMsg((e as Error).message); }
+  };
+  const testW = () => {
+    setWTesting(true); setWMsg("");
+    const run = (lat?: number, lon?: number) =>
+      api.post<{ ok: boolean; desc?: string; temp?: number; error?: string }>("/api/admin/geo/test-weather", lat != null ? { lat, lon } : {})
+        .then((d) => setWMsg(d.ok
+          ? `测试成功：${d.desc}${Number.isFinite(d.temp) ? ` ${Math.round(d.temp as number)}°C` : ""}`
+          : `测试失败：${d.error || "未知错误"}`))
+        .catch((e) => setWMsg(`测试失败：${(e as Error).message}`))
+        .finally(() => setWTesting(false));
+    if ("geolocation" in navigator) {
+      navigator.geolocation.getCurrentPosition(
+        (p) => void run(p.coords.latitude, p.coords.longitude),
+        () => void run(),
+        { timeout: 8000, maximumAge: 600000 },
+      );
+    } else void run();
+  };
+  const testG = async () => {
+    setGTesting(true); setGMsg("");
+    try {
+      const d = await api.post<{ ok: boolean; label?: string; district?: string; city?: string; error?: string }>("/api/admin/geo/test-geo", {});
+      setGMsg(d.ok ? `测试成功：${d.label}（${d.district || ""}${d.city ? ` / ${d.city}` : ""}）` : `测试失败：${d.error || "未知错误"}`);
+    } catch (e) { setGMsg(`测试失败：${(e as Error).message}`); }
+    finally { setGTesting(false); }
+  };
+  return (
+    <div className="panel oauth-card">
+      <button type="button" className="oauth-fold-head" aria-expanded={!collapsed} onClick={toggle}>
+        <span className="oauth-fold-title">天气与位置</span>
+        <span className={`badge${status === "已启用" ? " badge-pin" : ""}`}>{status}</span>
+        <svg className={`cal-chevron${collapsed ? "" : " open"}`} width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+      <div className={`oauth-collapse${collapsed ? "" : " open"}`}>
+        <div className="oauth-collapse-inner">
+          <h4 style={{ margin: "6px 0 2px" }}>天气（和风天气）</h4>
+          <p className="muted tiny">编辑器「自动获取」的天气来源。配置后优先使用和风实况（观测数据），未配置或失败时静默回退 Open-Meteo。在 <a href="https://dev.qweather.com" target="_blank" rel="noreferrer">dev.qweather.com</a> 注册免费订阅后把 KEY 填到下面（只存加密值，永不回显）。</p>
+          <div className="form">
+            <label className="check"><input type="checkbox" checked={w.enabled} onChange={(e) => setW({ ...w, enabled: e.target.checked })} /> 启用和风天气实况</label>
+            <label>QWeather API KEY<input type="password" value={wKey} placeholder={w.hasKey ? "已设置（留空不改）" : "未设置"} onChange={(e) => setWKey(e.target.value)} autoComplete="off" /></label>
+          </div>
+          {wMsg && <p className="ok-text">{wMsg}</p>}
+          <div className="btn-row">
+            <button className="btn btn-primary" onClick={() => void saveW(false)}>保存天气</button>
+            <button className="btn btn-ghost" disabled={wTesting} onClick={testW}>{wTesting ? "测试中…" : "测试"}</button>
+            {w.hasKey && <button className="btn btn-danger btn-sm" onClick={() => void saveW(true)}>清空 KEY</button>}
+          </div>
+          <h4 style={{ margin: "14px 0 2px" }}>位置（腾讯位置服务）</h4>
+          <p className="muted tiny">编辑器「自动获取」的位置来源。配置后优先使用腾讯逆地理（区县精度），未配置或失败时静默回退 BigDataCloud。在 <a href="https://lbs.qq.com" target="_blank" rel="noreferrer">lbs.qq.com</a> 申请 Key 后填到下面（只存加密值，永不回显）。</p>
+          <div className="form">
+            <label className="check"><input type="checkbox" checked={g.enabled} onChange={(e) => setG({ ...g, enabled: e.target.checked })} /> 启用腾讯位置服务逆地理</label>
+            <label>腾讯位置服务 Key<input type="password" value={gKey} placeholder={g.hasKey ? "已设置（留空不改）" : "未设置"} onChange={(e) => setGKey(e.target.value)} autoComplete="off" /></label>
+          </div>
+          {gMsg && <p className="ok-text">{gMsg}</p>}
+          <div className="btn-row">
+            <button className="btn btn-primary" onClick={() => void saveG(false)}>保存位置</button>
+            <button className="btn btn-ghost" disabled={gTesting} onClick={() => void testG()}>{gTesting ? "测试中…" : "测试"}</button>
+            {g.hasKey && <button className="btn btn-danger btn-sm" onClick={() => void saveG(true)}>清空 KEY</button>}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 function OauthSettings() {
   const [providers, setProviders] = useState<Record<string, { enabled: boolean; clientId: string; hasSecret: boolean; callback: string }>>({});
   const [secrets, setSecrets] = useState<Record<string, string>>({});

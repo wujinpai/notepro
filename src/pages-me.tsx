@@ -50,7 +50,7 @@ export function MePage({ user, site, refreshUser, onEditNote, onOpenNote }: {
       <section className="me-main">
         {tab === "profile" && <ProfileTab user={user} refreshUser={refreshUser} />}
         {tab === "security" && <SecurityTab user={user} refreshUser={refreshUser} />}
-        {tab === "notes" && <MyNotesTab onEditNote={onEditNote} onOpenNote={onOpenNote} />}
+        {tab === "notes" && <MyNotesTab site={site} onEditNote={onEditNote} onOpenNote={onOpenNote} />}
         {tab === "accounts" && <AccountsTab site={site} />}
         {tab === "admin" && user.role === "admin" && <AdminPage user={user} embedded />}
       </section>
@@ -237,7 +237,7 @@ function SecurityTab({ user, refreshUser }: { user: UserInfo; refreshUser: () =>
   );
 }
 
-function MyNotesTab({ onEditNote, onOpenNote }: { onEditNote: (n: NoteInfo) => void; onOpenNote: (n: NoteInfo) => void }) {
+function MyNotesTab({ site, onEditNote, onOpenNote }: { site: SiteInfo; onEditNote: (n: NoteInfo) => void; onOpenNote: (n: NoteInfo) => void }) {
   const [filter, setFilter] = useState("all");
   const [notes, setNotes] = useState<NoteInfo[]>([]);
   const [lb, setLb] = useState<{ images: string[]; index: number } | null>(null);
@@ -304,7 +304,7 @@ function MyNotesTab({ onEditNote, onOpenNote }: { onEditNote: (n: NoteInfo) => v
         </div>
       ))}
       {lb && <Lightbox images={lb.images} index={lb.index} onClose={() => setLb(null)} />}
-      {shareNote && <ShareDialog note={shareNote} onClose={() => setShareNote(null)} />}
+      {shareNote && <ShareDialog note={shareNote} brand={site.subtitle ? `${site.name} · ${site.subtitle}` : site.name} onClose={() => setShareNote(null)} />}
     </div>
   );
 }

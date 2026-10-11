@@ -470,7 +470,7 @@ async function main() {
     const tops = btns.map((b) => Math.round(b.getBoundingClientRect().top));
     return { n: btns.length, sameRow: btns.length > 0 && new Set(tops).size === 1, sw: seg?.scrollWidth || 0, cw: seg?.clientWidth || 0 };
   });
-  expect("390 管理后台：子标签单行横滑不折行", segRow.n === 6 && segRow.sameRow && segRow.sw > segRow.cw, JSON.stringify(segRow));
+  expect("390 管理后台：子标签单行横滑不折行", segRow.n === 7 && segRow.sameRow && segRow.sw > segRow.cw, JSON.stringify(segRow));
   // 后台按钮行：移动端保存/测试等高且等分整行
   await page.locator(".me-main .seg button", { hasText: "第三方登录" }).click();
   await page.waitForTimeout(600);

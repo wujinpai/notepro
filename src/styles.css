@@ -354,8 +354,6 @@ a.drawer-nav-item:hover, button.drawer-nav-item:hover { background: var(--surfac
 /* 分享弹窗与独立分享页 */
 .share-link-row { display: flex; gap: 8px; }
 .share-link-row input { flex: 1; min-width: 0; }
-.share-qr { display: flex; flex-direction: column; align-items: center; gap: 8px; }
-.share-qr img { width: 180px; height: 180px; border-radius: var(--r-img); border: 1px solid var(--border); background: #fff; padding: 6px; }
 .share-foot-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
 .share-page { min-height: 100vh; display: flex; flex-direction: column; }
 .share-brand {
@@ -520,6 +518,9 @@ th { color: var(--muted); font-weight: 500; font-size: 13px; }
 .site-footer > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; }
 .site-footer .icp-link { color: var(--muted); white-space: nowrap; flex: none; }
 .site-footer .icp-link:hover { color: var(--accent); }
+.site-footer .gh-link { color: var(--muted); display: inline-flex; align-items: center; flex: none; }
+.site-footer .gh-link:hover { color: var(--accent); }
+.site-footer .gh-link svg { display: block; }
 
 /* 响应式：390px 手机零横向溢出 */
 @media (max-width: 860px) {
@@ -574,3 +575,34 @@ th { color: var(--muted); font-weight: 500; font-size: 13px; }
   }
   .side-user { display: flex; }
 }
+
+/* 分享海报 */
+.share-poster-wrap { border: 1px solid var(--border); border-radius: var(--r-img); overflow: hidden; background: var(--bg); }
+.share-poster-preview { display: block; width: 100%; height: auto; }
+.share-poster-loading { padding: 52px 0; text-align: center; color: var(--muted); }
+/* 隐藏的海报捕获节点：固定 750px、屏外渲染，供 html-to-image 2x 导出；海报用固定浅色，与主题无关 */
+.poster-capture { position: fixed; left: -10000px; top: 0; width: 750px; pointer-events: none; }
+.poster { width: 750px; background: #fffdf8; color: #3d3830; border-radius: 20px; padding: 48px; font-size: 30px; line-height: 1.6; box-sizing: border-box; }
+.poster-head { display: flex; align-items: center; gap: 22px; }
+.poster-head .avatar { flex: none; }
+.poster-meta strong { display: block; font-size: 38px; line-height: 1.3; }
+.poster-meta span { color: #8a8478; font-size: 26px; }
+.poster-env { display: flex; align-items: center; gap: 20px; margin-top: 22px; color: #8a8478; font-size: 28px; }
+.poster-env .env-wx, .poster-env .env-loc { display: inline-flex; align-items: center; gap: 8px; }
+.poster-env svg { width: 32px; height: 32px; flex: none; }
+.poster-title { font-size: 40px; line-height: 1.4; margin: 26px 0 0; }
+.poster-excerpt { font-size: 32px; margin: 18px 0 0; word-break: break-word; }
+.poster-excerpt span { font-size: inherit; }
+.poster-imgs { display: grid; gap: 10px; margin-top: 26px; }
+.poster-imgs.cols-1 { grid-template-columns: minmax(0, 1fr); }
+.poster-imgs.cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.poster-imgs.cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.poster-imgs img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; border-radius: 12px; }
+.poster-imgs.cols-1 img { aspect-ratio: auto; max-height: 520px; }
+.poster-tags { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 26px; }
+.poster-chip { color: #1971c2; background: #eaf1f9; border-radius: 999px; padding: 10px 26px; font-size: 28px; }
+.poster-foot { display: flex; align-items: flex-end; justify-content: space-between; margin-top: 40px; padding-top: 30px; border-top: 1px solid #e8e0d0; }
+.poster-brand { color: #8a8478; font-size: 30px; padding-bottom: 12px; }
+.poster-qr { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.poster-qr img { width: 172px; height: 172px; background: #fff; padding: 10px; border-radius: 12px; border: 1px solid #e8e0d0; display: block; box-sizing: content-box; }
+.poster-qr span { font-size: 23px; color: #8a8478; }
