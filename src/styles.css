@@ -44,6 +44,9 @@ img { max-width: 100%; }
 .topbar {
   position: sticky; top: 0; z-index: 40; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
   padding: 10px 16px; background: var(--bg); border-bottom: 1px solid var(--border);
+  /* iOS 滚动时 sticky/fixed 栏若与滚动内容同合成层，背景会被透出卡片；强制独立合成层 */
+  -webkit-transform: translateZ(0); transform: translateZ(0);
+  -webkit-backface-visibility: hidden; backface-visibility: hidden;
 }
 /* 搜索弹出条（顶栏第二行整条展开） */
 .search-bar { flex: 1 1 100%; display: flex; align-items: center; gap: 8px; min-width: 0; }
@@ -163,6 +166,14 @@ a.side-user:hover { border-color: var(--accent); }
 .side-user-meta span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tag-row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
 .tag-row.wrap { margin-top: 0; }
+/* 卡片头部标签：单标签放 header 行最右，多标签紧跟用户名后横向换行 */
+.note-meta-top { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
+.note-meta-top > strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.head-tags { display: inline-flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+.head-tags .chip, .chip.head-tag-right {
+  flex: none; max-width: 132px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.chip.head-tag-right { margin-left: auto; align-self: flex-start; }
 .pager { display: flex; align-items: center; gap: 12px; justify-content: center; padding: 8px 0; }
 
 /* 日历 */
@@ -283,7 +294,12 @@ a.drawer-nav-item:hover, button.drawer-nav-item:hover { background: var(--surfac
 .note-detail h1 { font-size: 26px; margin: 12px 0 8px; overflow-wrap: anywhere; }
 .note-meta-line { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; font-size: 13px; margin-bottom: 16px; }
 .note-card-foot { display: flex; align-items: center; gap: 14px; margin-top: 12px; }
-.note-card-foot .share-act { margin-left: auto; }
+.foot-env { display: inline-flex; align-items: center; gap: 10px; flex-wrap: wrap; color: var(--muted); font-size: 13px; min-width: 0; }
+.note-card-foot .foot-acts { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; flex: none; }
+/* 通用底部分栏：左信息右操作（详情页、我的独白） */
+.foot-split { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.foot-split .foot-acts { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.my-note-item .foot-split { margin-top: 10px; }
 .share-author { display: flex; align-items: center; gap: 10px; }
 
 /* 评论区 */
@@ -344,6 +360,9 @@ a.drawer-nav-item:hover, button.drawer-nav-item:hover { background: var(--surfac
   display: flex; align-items: center; gap: 10px; width: 100%; max-width: 760px;
   margin: 0 auto; padding: 16px; color: var(--text);
   background: var(--bg); border-bottom: 1px solid var(--border);
+  /* 同顶栏：独立合成层，防 iOS 滚动时卡片透出 */
+  -webkit-transform: translateZ(0); transform: translateZ(0);
+  -webkit-backface-visibility: hidden; backface-visibility: hidden;
 }
 .share-main { flex: 1; width: 100%; max-width: 760px; margin: 0 auto; padding: 4px 16px calc(var(--footer-h) + env(safe-area-inset-bottom) + 24px); min-width: 0; }
 .share-card { border: 1px solid var(--border); border-radius: var(--r-card); background: var(--card); box-shadow: var(--shadow-card); padding: 20px; min-width: 0; }
@@ -491,6 +510,9 @@ th { color: var(--muted); font-weight: 500; font-size: 13px; }
   padding: 8px 16px calc(8px + env(safe-area-inset-bottom));
   display: flex; gap: 12px; align-items: center; justify-content: center;
   white-space: nowrap; overflow: hidden;
+  /* 同顶栏：独立合成层，防 iOS 滚动时卡片透出 */
+  -webkit-transform: translateZ(0); transform: translateZ(0);
+  -webkit-backface-visibility: hidden; backface-visibility: hidden;
 }
 .site-footer > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; }
 .site-footer .icp-link { color: var(--muted); white-space: nowrap; flex: none; }

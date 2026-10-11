@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, fmtTime, type NoteInfo, type SiteInfo, type UserInfo } from "./api";
-import { Avatar, Lightbox, Modal, PlaneIcon, ShareDialog, SliderCaptcha, imageHit } from "./components";
+import { Avatar, Lightbox, LocationBadge, Modal, PlaneIcon, ShareDialog, SliderCaptcha, WeatherBadge, imageHit } from "./components";
 import { renderMarkdown } from "./md";
 import { AdminPage } from "./pages-admin";
 
@@ -273,21 +273,33 @@ function MyNotesTab({ onEditNote, onOpenNote }: { onEditNote: (n: NoteInfo) => v
                 {n.title}
               </button>
             )}
+            {n.tags.length > 1 && (
+              <span className="head-tags">{n.tags.map((t) => <span key={t} className="chip">#{t}</span>)}</span>
+            )}
             {n.pinned && <span className="badge badge-pin">置顶</span>}
             <span className="badge">{n.archived ? "归档" : n.visibility === "private" ? "私密" : "公开"}</span>
             <span className="muted tiny">{fmtTime(n.createdAt)}</span>
+            {n.tags.length === 1 && <span className="chip head-tag-right">#{n.tags[0]}</span>}
           </div>
           <div className="my-note-preview markdown"
             onClick={(e) => { const hit = imageHit(e); if (hit) { setLb(hit); return; } onOpenNote(n); }}
             dangerouslySetInnerHTML={{ __html: renderMarkdown(n.content) }} />
-          <div className="row-gap">
-            <button className="btn btn-ghost btn-sm" onClick={() => onEditNote(n)}>编辑</button>
+          <div className="foot-split">
+            {(n.weather || n.location) && (
+              <span className="foot-env">
+                {n.weather && <WeatherBadge text={n.weather} />}
+                {n.location && <LocationBadge text={n.location} />}
+              </span>
+            )}
+            <span className="foot-acts">
+              <button className="btn btn-ghost btn-sm" onClick={() => onEditNote(n)}>编辑</button>
             {n.visibility === "private"
               ? <button className="btn btn-ghost btn-sm" onClick={() => void toggle(n, { visibility: "public" })}>设为公开</button>
               : <button className="btn btn-ghost btn-sm" onClick={() => void toggle(n, { visibility: "private" })}>设为私密</button>}
             <button className="btn btn-ghost btn-sm" onClick={() => void toggle(n, { archived: !n.archived })}>{n.archived ? "取消归档" : "归档"}</button>
             <button type="button" className="act-btn" aria-label="分享" title="分享" onClick={() => setShareNote(n)}><PlaneIcon /></button>
             <button className="btn btn-danger btn-sm" onClick={() => void del(n)}>删除</button>
+            </span>
           </div>
         </div>
       ))}

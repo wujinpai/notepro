@@ -259,7 +259,8 @@ export default function App() {
             : <EditorPage key={editNote?.id || "new"} note={editNote} onCancel={() => go("#")} onSaved={(n) => go(`#note/${n.id}`)} />
         ) : noteId ? (
           <NoteDetail noteId={Number(noteId)} user={user} onBack={() => go("#")} onEdit={openEdit} onDeleted={() => go("#")}
-            focusComments={commentFocus === Number(noteId)} onAuthRequest={() => setAuthOpen(true)} />
+            focusComments={commentFocus === Number(noteId)} onAuthRequest={() => setAuthOpen(true)}
+            onTag={(t) => { setTagFilter(t); go("#"); }} />
         ) : (
           <HomePage user={user} site={site} onOpenNote={openNote} onComment={openComment}
             q={q} onSearch={setQ}

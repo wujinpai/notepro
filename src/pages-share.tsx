@@ -58,10 +58,16 @@ export function SharePage({ token, noteId }: { token?: string; noteId?: number }
               <div className="share-author">
                 {note.author && <Avatar url={note.author.avatar} name={note.author.nickname} size={38} />}
                 <div className="note-meta">
-                  <strong>{note.author?.nickname || "用户"}</strong>
+                  <span className="note-meta-top">
+                    <strong>{note.author?.nickname || "用户"}</strong>
+                    {note.tags.length > 1 && (
+                      <span className="head-tags">{note.tags.map((t) => <span key={t} className="chip">#{t}</span>)}</span>
+                    )}
+                  </span>
                   <span className="muted tiny">@{note.author?.username} · {fmtTime(note.createdAt)}</span>
                 </div>
                 {note.pinned && <span className="badge badge-pin">置顶</span>}
+                {note.tags.length === 1 && <span className="chip head-tag-right">#{note.tags[0]}</span>}
               </div>
               {note.title && <h1>{note.title}</h1>}
               {(note.weather || note.location) && (
@@ -73,9 +79,6 @@ export function SharePage({ token, noteId }: { token?: string; noteId?: number }
               <div className="markdown"
                 onClick={(e) => { const hit = imageHit(e); if (hit) setLb(hit); }}
                 dangerouslySetInnerHTML={{ __html: renderMarkdown(note.content) }} />
-              {note.tags.length > 0 && (
-                <div className="tag-row">{note.tags.map((t) => <span key={t} className="chip">#{t}</span>)}</div>
-              )}
             </article>
             <div className="share-home-row">
               <a className="btn btn-ghost" href="/">回首页看更多</a>

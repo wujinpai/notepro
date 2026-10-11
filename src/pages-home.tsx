@@ -137,7 +137,7 @@ export function HomePage({ user, site, onOpenNote, onComment, q, onSearch, tag, 
             ))}
           </div>
         ) : (
-          notes.map((n) => <NoteCard key={n.id} note={n} onOpen={onOpenNote} onComment={onComment} />)
+          notes.map((n) => <NoteCard key={n.id} note={n} onOpen={onOpenNote} onComment={onComment} onTag={onTag} />)
         )}
         {settled && !loading && notes.length === 0 && !errMsg && (
           <div className="empty">暂无笔记{user ? "，点击右上角「独白」发布第一篇" : ""}。</div>
@@ -328,10 +328,10 @@ export function SiteDrawer({ open, onClose, site, user, theme, onToggleTheme, on
   );
 }
 
-export function NoteDetail({ noteId, user, onBack, onEdit, onDeleted, focusComments, onAuthRequest }: {
+export function NoteDetail({ noteId, user, onBack, onEdit, onDeleted, focusComments, onAuthRequest, onTag }: {
   noteId: number; user: UserInfo | null; onBack: () => void;
   onEdit: (n: NoteInfo) => void; onDeleted: () => void;
-  focusComments: boolean; onAuthRequest: () => void;
+  focusComments: boolean; onAuthRequest: () => void; onTag?: (t: string) => void;
 }) {
   const [note, setNote] = useState<NoteInfo | null>(null);
   const [error, setError] = useState("");
@@ -353,21 +353,41 @@ export function NoteDetail({ noteId, user, onBack, onEdit, onDeleted, focusComme
       <button className="text-btn" onClick={onBack}>← 返回列表</button>
       {note.title && <h1>{note.title}</h1>}
       <div className="note-meta-line muted">
-        {note.author?.nickname} · {new Date(note.createdAt).toLocaleString("zh-CN")}
-        {note.weather && <span> · <WeatherBadge text={note.weather} /></span>}
-        {note.location && <span> · <LocationBadge text={note.location} /></span>}
+        <span className="note-meta-top">
+          <strong>{note.author?.nickname}</strong>
+          {note.tags.length > 1 && (
+            <span className="head-tags">
+              {note.tags.map((t) => (
+                <button key={t} type="button" className="chip" title={`按标签 #${t} 筛选`}
+                  onClick={() => onTag?.(t)}>#{t}</button>
+              ))}
+            </span>
+          )}
+        </span>
+        <span>· {new Date(note.createdAt).toLocaleString("zh-CN")}</span>
         {note.pinned && <span className="badge badge-pin">置顶</span>}
         {note.visibility === "private" && <span className="badge">私密</span>}
         {note.archived && <span className="badge">归档</span>}
+        {note.tags.length === 1 && (
+          <button type="button" className="chip head-tag-right" title={`按标签 #${note.tags[0]} 筛选`}
+            onClick={() => onTag?.(note.tags[0])}>#{note.tags[0]}</button>
+        )}
       </div>
       <div className="markdown" onClick={(e) => { const hit = imageHit(e); if (hit) setLb(hit); }}
         dangerouslySetInnerHTML={{ __html: renderMarkdown(note.content) }} />
       {lb && <Lightbox images={lb.images} index={lb.index} onClose={() => setLb(null)} />}
-      {note.tags.length > 0 && <div className="tag-row">{note.tags.map((t) => <span key={t} className="chip">#{t}</span>)}</div>}
-      <div className="row-gap">
-        <button type="button" className="act-btn" aria-label="分享" title="分享" onClick={() => setShareOpen(true)}><PlaneIcon /></button>
-        {mine && user!.id === note.userId && <button className="btn btn-ghost" onClick={() => onEdit(note)}>编辑</button>}
-        {mine && <button className="btn btn-danger" onClick={() => void del()}>删除</button>}
+      <div className="foot-split">
+        {(note.weather || note.location) && (
+          <span className="foot-env">
+            {note.weather && <WeatherBadge text={note.weather} />}
+            {note.location && <LocationBadge text={note.location} />}
+          </span>
+        )}
+        <span className="foot-acts">
+          <button type="button" className="act-btn" aria-label="分享" title="分享" onClick={() => setShareOpen(true)}><PlaneIcon /></button>
+          {mine && user!.id === note.userId && <button className="btn btn-ghost" onClick={() => onEdit(note)}>编辑</button>}
+          {mine && <button className="btn btn-danger" onClick={() => void del()}>删除</button>}
+        </span>
       </div>
       {shareOpen && <ShareDialog note={note} onClose={() => setShareOpen(false)} />}
       {note.allowComments && <CommentsSection note={note} user={user} focus={focusComments} onAuthRequest={onAuthRequest} />}

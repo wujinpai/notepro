@@ -577,31 +577,40 @@ export function imageHit(e: React.MouseEvent): { images: string[]; index: number
 }
 
 // ---------- 笔记卡片 ----------
-export function NoteCard({ note, onOpen, onComment }: {
-  note: NoteInfo; onOpen: (n: NoteInfo) => void; onComment: (n: NoteInfo) => void;
+export function NoteCard({ note, onOpen, onComment, onTag }: {
+  note: NoteInfo; onOpen: (n: NoteInfo) => void; onComment: (n: NoteInfo) => void; onTag?: (t: string) => void;
 }) {
   const imgs = imagesOf(note.content);
   const [lb, setLb] = useState<{ images: string[]; index: number } | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
+  const pickTag = (e: { stopPropagation(): void }, t: string) => { e.stopPropagation(); onTag?.(t); };
   return (
     <>
     <article className="note-card" onClick={() => onOpen(note)}>
       <header>
         {note.author && <Avatar url={note.author.avatar} name={note.author.nickname} size={34} />}
         <div className="note-meta">
-          <strong>{note.author?.nickname || "用户"}</strong>
+          <span className="note-meta-top">
+            <strong>{note.author?.nickname || "用户"}</strong>
+            {note.tags.length > 1 && (
+              <span className="head-tags">
+                {note.tags.map((t) => (
+                  <button key={t} type="button" className="chip" title={`按标签 #${t} 筛选`}
+                    onClick={(e) => pickTag(e, t)}>#{t}</button>
+                ))}
+              </span>
+            )}
+          </span>
           <span className="muted tiny">@{note.author?.username} · {fmtTime(note.createdAt)}</span>
         </div>
         {note.pinned && <span className="badge badge-pin">置顶</span>}
         {note.visibility === "private" && <span className="badge">私密</span>}
         {note.archived && <span className="badge">归档</span>}
+        {note.tags.length === 1 && (
+          <button type="button" className="chip head-tag-right" title={`按标签 #${note.tags[0]} 筛选`}
+            onClick={(e) => pickTag(e, note.tags[0])}>#{note.tags[0]}</button>
+        )}
       </header>
-      {(note.weather || note.location) && (
-        <div className="note-env">
-          {note.weather && <WeatherBadge text={note.weather} />}
-          {note.location && <LocationBadge text={note.location} />}
-        </div>
-      )}
       {note.title && <h3>{note.title}</h3>}
       {excerpt(note.content) && <p className="note-excerpt" dangerouslySetInnerHTML={{ __html: excerpt(note.content) }} />}
       {imgs.length > 0 && (
@@ -612,16 +621,23 @@ export function NoteCard({ note, onOpen, onComment }: {
           ))}
         </div>
       )}
-      {note.tags.length > 0 && <div className="tag-row">{note.tags.map((t) => <span key={t} className="chip">#{t}</span>)}</div>}
       <div className="note-card-foot">
-        {note.allowComments && (
-          <button type="button" className="act-btn" aria-label={`评论（${note.commentCount} 条）`} title="评论"
-            onClick={(e) => { e.stopPropagation(); onComment(note); }}>
-            <BubbleIcon /><span className="act-count">{note.commentCount}</span>
-          </button>
+        {(note.weather || note.location) && (
+          <span className="foot-env">
+            {note.weather && <WeatherBadge text={note.weather} />}
+            {note.location && <LocationBadge text={note.location} />}
+          </span>
         )}
-        <button type="button" className="act-btn share-act" aria-label="分享" title="分享"
-          onClick={(e) => { e.stopPropagation(); setShareOpen(true); }}><PlaneIcon /></button>
+        <span className="foot-acts">
+          {note.allowComments && (
+            <button type="button" className="act-btn" aria-label={`评论（${note.commentCount} 条）`} title="评论"
+              onClick={(e) => { e.stopPropagation(); onComment(note); }}>
+              <BubbleIcon /><span className="act-count">{note.commentCount}</span>
+            </button>
+          )}
+          <button type="button" className="act-btn share-act" aria-label="分享" title="分享"
+            onClick={(e) => { e.stopPropagation(); setShareOpen(true); }}><PlaneIcon /></button>
+        </span>
       </div>
     </article>
     {lb && <Lightbox images={lb.images} index={lb.index} onClose={() => setLb(null)} />}
