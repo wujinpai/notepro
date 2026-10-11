@@ -340,6 +340,7 @@ label.check input { width: auto; }
 .code-row { display: flex; gap: 8px; }
 .code-row input { flex: 1; }
 .opt-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.opt-geo-row { display: flex; align-items: center; gap: 10px; margin-top: 8px; min-height: 24px; }
 
 /* 滑块 */
 .slider-wrap { display: flex; flex-direction: column; gap: 6px; width: 100%; }

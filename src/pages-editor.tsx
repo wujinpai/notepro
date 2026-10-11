@@ -5,6 +5,21 @@ import { countImages, renderMarkdown } from "./md";
 
 const COLOR_PRESETS = ["#e03131", "#e8590c", "#f08c00", "#2f9e44", "#1098ad", "#1971c2", "#7048e8", "#d6336c"];
 
+// WMO 天气码 → 中文（Open-Meteo current.weather_code）
+const WMO_ZH: Record<number, string> = {
+  0: "晴",
+  1: "以晴为主", 2: "多云", 3: "阴",
+  45: "雾", 48: "雾凇",
+  51: "毛毛雨", 53: "毛毛雨", 55: "毛毛雨",
+  56: "冻毛毛雨", 57: "冻毛毛雨",
+  61: "小雨", 63: "中雨", 65: "大雨",
+  66: "冻雨", 67: "冻雨",
+  71: "小雪", 73: "中雪", 75: "大雪", 77: "雪粒",
+  80: "阵雨", 81: "阵雨", 82: "暴雨",
+  85: "阵雪", 86: "阵雪",
+  95: "雷阵雨", 96: "雷阵雨伴冰雹", 99: "雷阵雨伴冰雹",
+};
+
 export function EditorPage({ note, onSaved, onCancel }: {
   note: NoteInfo | null; onSaved: (n: NoteInfo) => void; onCancel: () => void;
 }) {
@@ -21,6 +36,8 @@ export function EditorPage({ note, onSaved, onCancel }: {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [geoBusy, setGeoBusy] = useState(false);
+  const [geoMsg, setGeoMsg] = useState("");
   const [pane, setPane] = useState<"edit" | "preview">("edit");
   const taRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -171,6 +188,40 @@ export function EditorPage({ note, onSaved, onCancel }: {
     };
   }, [colorOpen]);
 
+  // ---- 自动获取天气与位置：用户点一次，浏览器定位一次；坐标只发给两个公开接口，不存不报 ----
+  const autoFillGeo = () => {
+    if (!("geolocation" in navigator)) { setGeoMsg("当前环境不支持定位，请手动填写"); return; }
+    setGeoBusy(true); setGeoMsg("");
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const lat = pos.coords.latitude.toFixed(4);
+        const lon = pos.coords.longitude.toFixed(4);
+        void Promise.all([
+          fetch(`https://api-bdc.io/data/reverse-geocode-client?latitude=${lat}&longitude=${lon}&localityLanguage=zh`)
+            .then((r) => { if (!r.ok) throw new Error("geo"); return r.json(); }),
+          fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,weather_code`)
+            .then((r) => { if (!r.ok) throw new Error("wx"); return r.json(); }),
+        ]).then(([g, w]) => {
+          // 位置：取行政层级 adminLevel 4（市级，如"重庆市"→"重庆"），兜底 city/locality/principalSubdivision
+          const admins: { adminLevel?: number; name?: string }[] = g?.localityInfo?.administrative || [];
+          const lvl4 = admins.find((a) => (a.adminLevel ?? 0) >= 4 && (a.adminLevel ?? 0) < 6)?.name || "";
+          let loc = lvl4 || g?.city || g?.locality || g?.principalSubdivision || "";
+          loc = String(loc).replace(/市$/, "");
+          if (loc) setLocation((v) => v || loc);
+          const code = w?.current?.weather_code;
+          const temp = w?.current?.temperature_2m;
+          const desc = typeof code === "number" ? WMO_ZH[code] : undefined;
+          if (desc && typeof temp === "number") setWeather((v) => v || `${desc} ${Math.round(temp)}°C`);
+          else if (desc) setWeather((v) => v || desc);
+          if (!loc && !desc) setGeoMsg("获取失败，请手动填写");
+        }).catch(() => setGeoMsg("获取失败，请手动填写"))
+          .finally(() => setGeoBusy(false));
+      },
+      () => { setGeoBusy(false); setGeoMsg("定位失败，请手动填写"); },
+      { timeout: 15000, maximumAge: 600000 },
+    );
+  };
+
   const save = async () => {
     setBusy(true); setError("");
     try {
@@ -248,6 +299,12 @@ export function EditorPage({ note, onSaved, onCancel }: {
         <div className="opt-grid">
           <label className="opt">天气（可选）<input value={weather} placeholder="如 晴 26℃" onChange={(e) => setWeather(e.target.value)} /></label>
           <label className="opt">位置（可选）<input value={location} placeholder="如 重庆" onChange={(e) => setLocation(e.target.value)} /></label>
+        </div>
+        <div className="opt-geo-row">
+          <button type="button" className="text-btn" disabled={geoBusy} onClick={autoFillGeo} aria-label="自动获取天气与位置">
+            {geoBusy ? "定位获取中…" : "📍 自动获取"}
+          </button>
+          {geoMsg && <span className="muted tiny" role="status">{geoMsg}</span>}
         </div>
         <div className="opt-row">
           <span className="opt-label">可见性</span>
