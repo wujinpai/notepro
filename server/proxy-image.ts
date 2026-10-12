@@ -4,7 +4,8 @@ import { lookup as dnsLookup } from "node:dns/promises";
 import net from "node:net";
 
 export const PROXY_MAX_BYTES = 8 * 1024 * 1024;
-export const PROXY_TIMEOUT_MS = 10_000;
+// 图床可能很慢（实测 cnb.jisu.cn 约 130KB/s，2MB 图需 ~16s），超时太短会把好图当失败剔除
+export const PROXY_TIMEOUT_MS = 30_000;
 const MAX_REDIRECTS = 3;
 
 // 浏览器身份请求头：部分图床/ CDN 会拦截无 UA 或非浏览器 UA 的服务端抓取

@@ -476,9 +476,10 @@ export function ShareDialog({ note, brand, onClose }: { note: NoteInfo; brand?: 
     let dead = false;
     setGenState("working"); setPosterPng(""); setSaveMsg(""); setBadImgs([]); setAvatarBad(false);
     // 外链图（正文 Markdown 外链、OAuth 外链头像）先改写为服务端代理地址再等待加载；
-    // 全部 <img> settle：load 即过；error 立即记为坏图；仍在加载中的最多等 20s
-    //（手机慢网络下原图可达数 MB，4s 会把还没下完的好图误杀）。坏图直接剔除
-    //（九宫格按剩余重排，不留占位），20s 后仍未完成的才剔除。
+    // 全部 <img> settle：load 即过；error 立即记为坏图；仍在加载中的最多等 30s
+    //（手机慢网络下原图可达数 MB，且服务端代理抓取慢图床也可能耗时十几秒，
+    // 超时太短会把还没下完的好图误杀）。坏图直接剔除
+    //（九宫格按剩余重排，不留占位），30s 后仍未完成的才剔除。
     const settleImages = async (node: HTMLElement) => {
       node.querySelectorAll("img").forEach((el) => {
         const img = el as HTMLImageElement;
@@ -496,7 +497,7 @@ export function ShareDialog({ note, brand, onClose }: { note: NoteInfo; brand?: 
               const onDone = () => done();
               el.addEventListener("load", onDone, { once: true });
               el.addEventListener("error", onDone, { once: true });
-              setTimeout(onDone, 20000);
+              setTimeout(onDone, 30000);
             })
         )
       );
@@ -621,7 +622,7 @@ export function ShareDialog({ note, brand, onClose }: { note: NoteInfo; brand?: 
                 <button type="button" className="btn btn-ghost" onClick={regen}>重新生成</button>
               </div>
             ) : (
-              <div className="share-poster-loading" role="status">海报生成中…</div>
+              <div className="share-poster-loading" role="status">海报生成中…<br /><span className="muted tiny">图片较多或较大时需多等一会儿</span></div>
             )}
           </div>
           <button type="button" className="btn btn-primary btn-block"
