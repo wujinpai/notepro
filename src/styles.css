@@ -642,3 +642,10 @@ th { color: var(--muted); font-weight: 500; font-size: 13px; }
 /* 正文视频 */
 .video-wrap { margin: 12px 0; }
 .video-wrap video, .note-content video, .markdown video { width: 100%; max-height: 480px; border-radius: 12px; background: #000; display: block; }
+
+/* 文件下载卡片 */
+.file-card { display: flex; align-items: center; gap: 10px; margin: 10px 0; padding: 10px 12px; background: var(--card-2); border: 1px solid var(--border); border-radius: 10px; text-decoration: none; color: inherit; }
+.file-card:hover { border-color: var(--accent); }
+.file-ext { flex: none; min-width: 40px; text-align: center; padding: 4px 6px; font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); border-radius: 6px; }
+.file-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+.file-dl { flex: none; font-size: 12px; color: var(--accent); }

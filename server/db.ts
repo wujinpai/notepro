@@ -76,7 +76,8 @@ CREATE TABLE IF NOT EXISTS notes (
   archived INTEGER NOT NULL DEFAULT 0,
   allow_comments INTEGER NOT NULL DEFAULT 1,
   created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL
+  updated_at INTEGER NOT NULL,
+  expires_at INTEGER
 );
 CREATE TABLE IF NOT EXISTS media (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -162,4 +163,9 @@ export function getSetting(key: string, def = ""): string {
 }
 export function setSetting(key: string, value: string): void {
   db.prepare("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").run(key, value);
+}
+
+// 迁移：notes 增加 expires_at（到期自动删除，NULL=永久）
+if (!noteCols.some((c) => c.name === "expires_at")) {
+  db.exec("ALTER TABLE notes ADD COLUMN expires_at INTEGER");
 }

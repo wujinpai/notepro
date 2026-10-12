@@ -19,6 +19,25 @@ export function EditorPage({ note, site, onSaved, onCancel }: {
   const [pinned, setPinned] = useState(!!note?.pinned);
   const [archived, setArchived] = useState(!!note?.archived);
   const [allowComments, setAllowComments] = useState(note?.allowComments ?? true);
+  const [expireOpt, setExpireOpt] = useState<string>(() => {
+    if (!note?.expiresAt) return "forever";
+    const days = Math.round((note.expiresAt - Date.now()) / 86400000);
+    return days <= 1 ? "1d" : days <= 7 ? "7d" : days <= 30 ? "30d" : "custom";
+  });
+  const [expireCustom, setExpireCustom] = useState(() => {
+    if (note?.expiresAt) { const d = new Date(note.expiresAt); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; }
+    return "";
+  });
+  const expiresAt = (() => {
+    if (expireOpt === "1d") return Date.now() + 86400000;
+    if (expireOpt === "7d") return Date.now() + 7 * 86400000;
+    if (expireOpt === "30d") return Date.now() + 30 * 86400000;
+    if (expireOpt === "custom" && expireCustom) {
+      const t = new Date(expireCustom + "T23:59:59").getTime();
+      return Number.isFinite(t) && t > Date.now() ? t : null;
+    }
+    return null;
+  })();
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -28,6 +47,22 @@ export function EditorPage({ note, site, onSaved, onCancel }: {
   const taRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLInputElement>(null);
+  const fileRef2 = useRef<HTMLInputElement>(null);
+
+  const insertFile = async (file: File) => {
+    if (!site.fileUpload.enabled) { setError("文件上传已关闭"); return; }
+    setUploading(true);
+    try {
+      const r = await api.upload("/api/upload", file);
+      const md = `\n[${file.name}](${r.path})\n`;
+      const ta = taRef.current;
+      if (ta) {
+        const s = ta.selectionStart || content.length, e = ta.selectionEnd || s;
+        setContent(content.slice(0, s) + md + content.slice(e));
+      } else setContent(content + md);
+    } catch (err) { setError((err as Error).message); }
+    finally { setUploading(false); }
+  };
 
   useEffect(() => {
     api.get<{ tags: { name: string }[] }>("/api/tags?mine=1").then((d) => setSuggestions(d.tags.map((t) => t.name))).catch(() => undefined);
@@ -244,7 +279,7 @@ export function EditorPage({ note, site, onSaved, onCancel }: {
   const save = async () => {
     setBusy(true); setError("");
     try {
-      const body = { title, content, tags, weather, location, visibility, pinned, archived, allowComments };
+      const body = { title, content, tags, weather, location, visibility, pinned, archived, allowComments, expiresAt };
       const d = note
         ? await api.put<{ note: NoteInfo }>(`/api/notes/${note.id}`, body)
         : await api.post<{ note: NoteInfo }>("/api/notes", body);
@@ -290,6 +325,10 @@ export function EditorPage({ note, site, onSaved, onCancel }: {
                   <button type="button" className="md-tool" title={`插入视频（上传，最大 ${site.videoUpload.maxMb}MB）`} disabled={uploading}
                     onClick={() => { if (countVideos(content) >= 3) { setError("每篇独白最多 3 个视频，已达上限"); return; } videoRef.current?.click(); }}>{uploading ? "上传中…" : "视频"}</button>
                 )}
+                {site.fileUpload.enabled && (
+                  <button type="button" className="md-tool" title={`插入文件（上传，最大 ${site.fileUpload.maxMb}MB）`} disabled={uploading}
+                    onClick={() => fileRef2.current?.click()}>{uploading ? "上传中…" : "文件"}</button>
+                )}
                 <button type="button" className="md-tool md-tool-mono" title="行内代码" onClick={() => wrapSel("`", "`", "代码")}>{"<>"}</button>
                 <button type="button" className="md-tool md-tool-mono" title="代码块" onClick={() => wrapSel("```\n", "\n```", "代码")}>{"{ }"}</button>
                 <button type="button" className="md-tool" title="引用" onClick={() => linePrefix("> ")}>引用</button>
@@ -300,6 +339,8 @@ export function EditorPage({ note, site, onSaved, onCancel }: {
                   onChange={(e) => { const f = e.target.files?.[0]; if (f) void insertImage(f); e.target.value = ""; }} />
                 <input ref={videoRef} type="file" accept="video/mp4,video/webm,video/quicktime" hidden
                   onChange={(e) => { const f = e.target.files?.[0]; if (f) void insertImage(f); e.target.value = ""; }} />
+                <input ref={fileRef2} type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip,.rar,.7z" hidden
+                  onChange={(e) => { const f = e.target.files?.[0]; if (f) void insertFile(f); e.target.value = ""; }} />
               </div>
               {colorOpen && (
                 <div className="color-pop" style={{ top: colorPos.top, left: colorPos.left }} role="menu" aria-label="字体颜色">
@@ -340,6 +381,18 @@ export function EditorPage({ note, site, onSaved, onCancel }: {
           <label className="check"><input type="checkbox" checked={pinned} onChange={(e) => setPinned(e.target.checked)} /> 置顶</label>
           <label className="check"><input type="checkbox" checked={archived} onChange={(e) => setArchived(e.target.checked)} /> 归档（不在广场出现）</label>
           <label className="check"><input type="checkbox" checked={allowComments} onChange={(e) => setAllowComments(e.target.checked)} /> 允许评论</label>
+          <span className="opt-label">删除时间</span>
+          <div className="seg">
+            <button className={expireOpt === "forever" ? "on" : ""} onClick={() => setExpireOpt("forever")}>永久</button>
+            <button className={expireOpt === "1d" ? "on" : ""} onClick={() => setExpireOpt("1d")}>1天</button>
+            <button className={expireOpt === "7d" ? "on" : ""} onClick={() => setExpireOpt("7d")}>7天</button>
+            <button className={expireOpt === "30d" ? "on" : ""} onClick={() => setExpireOpt("30d")}>30天</button>
+            <button className={expireOpt === "custom" ? "on" : ""} onClick={() => setExpireOpt("custom")}>自定</button>
+          </div>
+          {expireOpt === "custom" && (
+            <input type="date" value={expireCustom} onChange={(e) => setExpireCustom(e.target.value)} className="input" style={{ maxWidth: 180 }} />
+          )}
+          {expiresAt && <p className="muted tiny">到期后自动删除该独白及附件（{new Date(expiresAt).toLocaleDateString()}）</p>}
         </div>
         {error && <p className="err-text">{error}</p>}
       </div>

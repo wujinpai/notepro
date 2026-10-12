@@ -25,7 +25,14 @@ function inline(s: string): string {
   });
   s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_m, t, url) => {
     const u = safeUrl(url);
-    return u ? keep(`<a href="${u}" target="_blank" rel="noopener noreferrer">${t}</a>`) : t;
+    if (!u) return t;
+    // 本地上传文件渲染为下载卡片
+    if (/^\/uploads\/files\//i.test(u)) {
+      const name = String(t).replace(/^📎\s*/, "");
+      const ext = (u.split(".").pop() || "").toLowerCase().slice(0, 6);
+      return keep(`<a class="file-card" href="${u}" download><span class="file-ext">${esc(ext)}</span><span class="file-name">${name}</span><span class="file-dl">下载</span></a>`);
+    }
+    return keep(`<a href="${u}" target="_blank" rel="noopener noreferrer">${t}</a>`);
   });
   s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
   s = s.replace(/(^|\W)\*([^*\n]+)\*/g, "$1<em>$2</em>");

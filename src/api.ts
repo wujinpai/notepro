@@ -7,7 +7,7 @@ export interface NoteInfo {
   id: number; userId: number; title: string; content: string; tags: string[];
   weather: string; location: string; visibility: string; pinned: boolean; archived: boolean;
   createdAt: number; updatedAt: number; author: AuthorInfo | null;
-  allowComments: boolean; commentCount: number; viewCount: number;
+  allowComments: boolean; commentCount: number; viewCount: number; expiresAt: number | null;
 }
 export interface CommentInfo {
   id: number; noteId: number; userId: number; content: string; createdAt: number;
@@ -16,7 +16,7 @@ export interface CommentInfo {
 export interface SiteInfo {
   name: string; subtitle: string; description: string; keywords: string; footer: string;
   icp: string; logo: string; accent: string; registerOpen: boolean; inviteOnly: boolean;
-  videoUpload: { enabled: boolean; maxMb: number }; oauthProviders: string[];
+  videoUpload: { enabled: boolean; maxMb: number }; fileUpload: { enabled: boolean; maxMb: number }; oauthProviders: string[];
 }
 
 // ---------- 主题强调色 ----------

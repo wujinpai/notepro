@@ -62,6 +62,7 @@ function sitePayload() {
     registerOpen: getSetting("site_register_open", "1") === "1",
     inviteOnly: getSetting("site_invite_only", "0") === "1",
     videoUpload: { enabled: videoUploadEnabled(), maxMb: Math.max(1, Math.min(100, Number(getSetting("upload_video_max_mb", "10")) || 10)) },
+    fileUpload: { enabled: fileUploadEnabled(), maxMb: Math.max(1, Math.min(100, Number(getSetting("upload_file_max_mb", "10")) || 10)) },
     oauthProviders: oauth,
   };
 }
@@ -314,18 +315,40 @@ app.get("/api/auth/oauth/:provider/callback", async (req, res) => {
 // ---------- 上传 ----------
 const ALLOWED_IMG: Record<string, string> = { "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp" };
 const ALLOWED_VIDEO: Record<string, string> = { "video/mp4": "mp4", "video/webm": "webm", "video/quicktime": "mov" };
+const ALLOWED_FILE: Record<string, string> = {
+  "application/pdf": "pdf",
+  "application/msword": "doc",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+  "application/vnd.ms-excel": "xls",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+  "application/vnd.ms-powerpoint": "ppt",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation": "pptx",
+  "text/plain": "txt",
+  "application/zip": "zip",
+  "application/x-rar-compressed": "rar",
+  "application/x-7z-compressed": "7z",
+};
 const VIDEO_DIR = join(STORAGE_DIR, "videos");
+const FILE_DIR = join(STORAGE_DIR, "files");
 if (!existsSync(VIDEO_DIR)) mkdirSync(VIDEO_DIR, { recursive: true });
+if (!existsSync(FILE_DIR)) mkdirSync(FILE_DIR, { recursive: true });
 const videoUploadEnabled = () => getSetting("upload_video_enabled", "1") === "1";
+const fileUploadEnabled = () => getSetting("upload_file_enabled", "1") === "1";
 const videoMaxBytes = () => {
   const mb = Math.max(1, Math.min(100, Number(getSetting("upload_video_max_mb", "10")) || 10));
   return mb * 1024 * 1024;
 };
+const fileMaxBytes = () => {
+  const mb = Math.max(1, Math.min(100, Number(getSetting("upload_file_max_mb", "10")) || 10));
+  return mb * 1024 * 1024;
+};
+const uploadDest = (mimetype: string) => mimetype.startsWith("video/") ? VIDEO_DIR : mimetype.startsWith("image/") ? IMG_DIR : FILE_DIR;
+const uploadUrlPrefix = (mimetype: string) => mimetype.startsWith("video/") ? "/uploads/videos/" : mimetype.startsWith("image/") ? "/uploads/images/" : "/uploads/files/";
 const upload = multer({
   storage: multer.diskStorage({
-    destination: (_req, file, cb) => cb(null, file.mimetype.startsWith("video/") ? VIDEO_DIR : IMG_DIR),
+    destination: (_req, file, cb) => cb(null, uploadDest(file.mimetype)),
     filename: (_req, file, cb) => {
-      const ext = ALLOWED_IMG[file.mimetype] || ALLOWED_VIDEO[file.mimetype] || "bin";
+      const ext = ALLOWED_IMG[file.mimetype] || ALLOWED_VIDEO[file.mimetype] || ALLOWED_FILE[file.mimetype] || "bin";
       cb(null, `${Date.now()}_${Math.random().toString(36).slice(2, 10)}.${ext}`);
     },
   }),
@@ -337,28 +360,33 @@ const upload = multer({
       if (!videoUploadEnabled()) cb(new Error("视频上传已关闭"));
       else cb(null, true);
     }
-    else cb(new Error("仅支持 PNG/JPG/GIF/WebP 图片及 MP4/WebM/MOV 视频"));
+    else if (ALLOWED_FILE[file.mimetype] && ["pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "zip", "rar", "7z"].includes(ext)) {
+      if (!fileUploadEnabled()) cb(new Error("文件上传已关闭"));
+      else cb(null, true);
+    }
+    else cb(new Error("仅支持 PNG/JPG/GIF/WebP 图片、MP4/WebM/MOV 视频及常用文档"));
   },
 });
 function handleUpload(req: Request, res: Response, kind: "note" | "avatar" | "site") {
   if (!req.file) return fail(res, 400, "未收到文件");
   const isVideo = req.file.mimetype.startsWith("video/");
-  // 头像/站点 Logo 不接受视频
-  if (isVideo && kind !== "note") {
+  const isFile = !isVideo && !req.file.mimetype.startsWith("image/");
+  // 头像/站点 Logo 不接受视频和文件
+  if ((isVideo || isFile) && kind !== "note") {
     try { unlinkSync(req.file.path); } catch { /* ignore */ }
     return fail(res, 400, "此处仅支持图片");
   }
-  const maxBytes = isVideo ? videoMaxBytes() : 5 * 1024 * 1024;
+  const maxBytes = isVideo ? videoMaxBytes() : isFile ? fileMaxBytes() : 5 * 1024 * 1024;
   if (req.file.size > maxBytes) {
     try { unlinkSync(req.file.path); } catch { /* ignore */ }
     return fail(res, 400, `文件超过 ${(maxBytes / 1024 / 1024).toFixed(0)}MB 限制`);
   }
-  const rel = isVideo ? `/uploads/videos/${req.file.filename}` : `/uploads/images/${req.file.filename}`;
+  const rel = `${uploadUrlPrefix(req.file.mimetype)}${req.file.filename}`;
   db.prepare("INSERT INTO media(user_id,filename,path,mime,size,created_at) VALUES(?,?,?,?,?,?)")
     .run(authedUser(req).id, req.file.filename, rel, req.file.mimetype, req.file.size, Date.now());
   if (kind === "avatar") db.prepare("UPDATE users SET avatar=? WHERE id=?").run(rel, authedUser(req).id);
   if (kind === "site") setSetting("site_logo", rel);
-  ok(res, { path: rel, url: rel });
+  ok(res, { path: rel, url: rel, size: req.file.size });
 }
 const uploadErr = (err: unknown, _req: Request, res: Response, next: (e?: unknown) => void) => {
   if (err) return fail(res, 400, (err as Error).message || "上传失败");
@@ -451,7 +479,7 @@ interface NoteRow {
   id: number; user_id: number; title: string; content: string; tags: string; weather: string; location: string;
   visibility: string; pinned: number; archived: number; created_at: number; updated_at: number;
   view_count: number;
-  share_token: string; allow_comments: number;
+  share_token: string; allow_comments: number; expires_at: number | null;
 }
 function noteJson(n: NoteRow, withAuthor = true) {
   const author = withAuthor ? getUserById(n.user_id) : undefined;
@@ -462,6 +490,7 @@ function noteJson(n: NoteRow, withAuthor = true) {
     pinned: !!n.pinned, archived: !!n.archived, createdAt: n.created_at, updatedAt: n.updated_at,
     viewCount: n.view_count || 0,
     allowComments: n.allow_comments !== 0,
+    expiresAt: n.expires_at || null,
     commentCount: (db.prepare("SELECT COUNT(*) c FROM comments WHERE note_id=?").get(n.id) as { c: number }).c,
     author: author ? { id: author.id, username: author.username, nickname: author.nickname || author.username, avatar: author.avatar } : null,
   };
@@ -627,12 +656,12 @@ app.delete("/api/comments/:id", requireAuth, (req, res) => {
 const countNoteImages = (content: string) => ((content || "").match(/!\[[^\]]*\]\([^)\s]+\)/g) || []).length;
 const VIDEO_EXT = /\.(mp4|webm|mov)$/i;
 const countNoteVideos = (content: string) => ((content || "").match(/!\[[^\]]*\]\([^)\s]+\.(mp4|webm|mov)\)/gi) || []).length;
-// 正文中的本地上传文件路径（/uploads/images/xxx 或 /uploads/videos/xxx），用于删除笔记/移除时清理孤儿文件
+// 正文中的本地上传文件路径（/uploads/images/xxx、/uploads/videos/xxx 或 /uploads/files/xxx），用于删除笔记/移除时清理孤儿文件
 const localImagePathsOf = (content: string): string[] => {
   const out = new Set<string>();
-  const re = /!\[[^\]]*\]\((\/uploads\/(?:images|videos)\/[^)\s]+)\)/g;
+  const re = /!?\[([^\]]*)\]\((\/uploads\/(?:images|videos|files)\/[^)\s]+)\)/g;
   let m: RegExpExecArray | null;
-  while ((m = re.exec(content || ""))) out.add(m[1]);
+  while ((m = re.exec(content || ""))) out.add(m[2]);
   return [...out];
 };
 // 删除不再被任何笔记引用的本地图片（文件 + media 记录）。excludeNoteId 用于"编辑移除"场景：
@@ -661,10 +690,16 @@ app.post("/api/notes", requireAuth, (req, res) => {
   if (countNoteVideos(content) > 3) return fail(res, 400, "每篇独白最多插入 3 个视频");
   const tags = Array.isArray(req.body?.tags) ? (req.body.tags as unknown[]).map((t) => String(t).trim().slice(0, 24)).filter(Boolean).slice(0, 10) : [];
   const now = Date.now();
-  const info = db.prepare("INSERT INTO notes(user_id,title,content,tags,weather,location,visibility,pinned,archived,allow_comments,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)")
+  const expiresAt = (() => {
+    const v = req.body?.expiresAt;
+    if (v === null || v === undefined || v === "") return null;
+    const t = Number(v);
+    return Number.isFinite(t) && t > now ? Math.floor(t) : null;
+  })();
+  const info = db.prepare("INSERT INTO notes(user_id,title,content,tags,weather,location,visibility,pinned,archived,allow_comments,created_at,updated_at,expires_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)")
     .run(u.id, title, content, JSON.stringify(tags), String(req.body?.weather || "").slice(0, 30), String(req.body?.location || "").slice(0, 60),
       req.body?.visibility === "private" ? "private" : "public", req.body?.pinned ? 1 : 0, req.body?.archived ? 1 : 0,
-      req.body?.allowComments === false ? 0 : 1, now, now);
+      req.body?.allowComments === false ? 0 : 1, now, now, expiresAt);
   const n = db.prepare("SELECT * FROM notes WHERE id=?").get(Number(info.lastInsertRowid)) as unknown as NoteRow;
   ok(res, { note: noteJson(n) });
 });
@@ -676,11 +711,13 @@ app.put("/api/notes/:id", requireAuth, (req, res) => {
   if (countNoteImages(newContent) > 9) return fail(res, 400, "每篇独白最多插入 9 张图片");
   if (countNoteVideos(newContent) > 3) return fail(res, 400, "每篇独白最多插入 3 个视频");
   const tags = Array.isArray(req.body?.tags) ? (req.body.tags as unknown[]).map((t) => String(t).trim().slice(0, 24)).filter(Boolean).slice(0, 10) : JSON.parse(n.tags);
-  db.prepare("UPDATE notes SET title=?,content=?,tags=?,weather=?,location=?,visibility=?,pinned=?,archived=?,allow_comments=?,updated_at=? WHERE id=?")
+  db.prepare("UPDATE notes SET title=?,content=?,tags=?,weather=?,location=?,visibility=?,pinned=?,archived=?,allow_comments=?,updated_at=?,expires_at=? WHERE id=?")
     .run(String(req.body?.title ?? n.title).slice(0, 120), newContent, JSON.stringify(tags),
       String(req.body?.weather ?? n.weather).slice(0, 30), String(req.body?.location ?? n.location).slice(0, 60),
       req.body?.visibility === "private" ? "private" : "public", req.body?.pinned ? 1 : 0, req.body?.archived ? 1 : 0,
-      req.body?.allowComments !== undefined ? (req.body.allowComments ? 1 : 0) : n.allow_comments, Date.now(), n.id);
+      req.body?.allowComments !== undefined ? (req.body.allowComments ? 1 : 0) : n.allow_comments, Date.now(),
+      req.body?.expiresAt === undefined ? n.expires_at : (req.body.expiresAt === null || req.body.expiresAt === "" ? null : (() => { const t = Number(req.body.expiresAt); return Number.isFinite(t) && t > Date.now() ? Math.floor(t) : null; })()),
+      n.id);
   // 编辑时删掉的图片：若不再被其他笔记引用，删除文件释放空间
   const removed = localImagePathsOf(n.content).filter((p) => !localImagePathsOf(newContent).includes(p));
   if (removed.length) cleanupOrphanedImages(removed, n.id);
@@ -884,6 +921,8 @@ app.get("/api/admin/upload", requireAdmin, (_req, res) => {
   ok(res, {
     videoEnabled: videoUploadEnabled(),
     videoMaxMb: Math.max(1, Math.min(100, Number(getSetting("upload_video_max_mb", "10")) || 10)),
+    fileEnabled: fileUploadEnabled(),
+    fileMaxMb: Math.max(1, Math.min(100, Number(getSetting("upload_file_max_mb", "10")) || 10)),
   });
 });
 app.put("/api/admin/upload", requireAdmin, (req, res) => {
@@ -892,6 +931,11 @@ app.put("/api/admin/upload", requireAdmin, (req, res) => {
   if (b.videoMaxMb !== undefined) {
     const mb = Math.max(1, Math.min(100, Math.floor(Number(b.videoMaxMb)) || 10));
     setSetting("upload_video_max_mb", String(mb));
+  }
+  if (b.fileEnabled !== undefined) setSetting("upload_file_enabled", b.fileEnabled ? "1" : "0");
+  if (b.fileMaxMb !== undefined) {
+    const mb = Math.max(1, Math.min(100, Math.floor(Number(b.fileMaxMb)) || 10));
+    setSetting("upload_file_max_mb", String(mb));
   }
   ok(res);
 });
@@ -1309,6 +1353,25 @@ if (existsSync(PUBLIC_DIR)) {
     res.type("html").send(renderIndex());
   });
 }
+
+// 到期自动删除：每 10 分钟检查一次，删除 expires_at 已到的笔记（含其上传文件）
+function deleteExpiredNotes() {
+  try {
+    const now = Date.now();
+    const rows = db.prepare("SELECT id, content FROM notes WHERE expires_at IS NOT NULL AND expires_at <= ?").all(now) as { id: number; content: string }[];
+    for (const r of rows) {
+      const paths = localImagePathsOf(r.content);
+      db.prepare("DELETE FROM comments WHERE note_id=?").run(r.id);
+      db.prepare("DELETE FROM notes WHERE id=?").run(r.id);
+      if (paths.length) cleanupOrphanedImages(paths, r.id);
+    }
+    if (rows.length) console.log(`[expiry] deleted ${rows.length} expired note(s)`);
+  } catch (e) {
+    console.error("[expiry] failed:", (e as Error).message);
+  }
+}
+setInterval(deleteExpiredNotes, 10 * 60 * 1000);
+deleteExpiredNotes();
 
 app.listen(PORT, () => {
   console.log(`NotePro server listening on :${PORT}`);

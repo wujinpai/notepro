@@ -582,7 +582,7 @@ function InviteCodes() {
 
 // ---------- 上传设置 ----------
 function UploadSettings() {
-  const [f, setF] = useState({ videoEnabled: true, videoMaxMb: 10 });
+  const [f, setF] = useState({ videoEnabled: true, videoMaxMb: 10, fileEnabled: true, fileMaxMb: 10 });
   const [msg, setMsg] = useState("");
   useEffect(() => { api.get<typeof f>("/api/admin/upload").then(setF).catch(() => undefined); }, []);
   const save = async () => {
@@ -598,7 +598,12 @@ function UploadSettings() {
           <input type="number" min={1} max={100} value={f.videoMaxMb}
             onChange={(e) => setF({ ...f, videoMaxMb: Math.max(1, Math.min(100, Number(e.target.value) || 10)) })} style={{ width: 100 }} />
         </label>
-        <p className="muted tiny">图片限制固定为 5MB；每篇独白最多 3 个视频。关闭视频上传后，编辑器不再显示视频按钮，已发布视频不受影响。</p>
+        <label className="check"><input type="checkbox" checked={f.fileEnabled} onChange={(e) => setF({ ...f, fileEnabled: e.target.checked })} /> 允许上传文件（PDF/Word/Excel/PPT/TXT/ZIP/RAR/7z）</label>
+        <label>文件大小限制（MB）
+          <input type="number" min={1} max={100} value={f.fileMaxMb}
+            onChange={(e) => setF({ ...f, fileMaxMb: Math.max(1, Math.min(100, Number(e.target.value) || 10)) })} style={{ width: 100 }} />
+        </label>
+        <p className="muted tiny">图片限制固定为 5MB；每篇独白最多 3 个视频。关闭某项上传后，编辑器不再显示对应按钮，已发布内容不受影响。</p>
       </div>
       {msg && <p className="ok-text">{msg}</p>}
       <div className="btn-row">

@@ -403,10 +403,11 @@ export function NoteDetail({ noteId, user, site, onBack, onEdit, onDeleted, focu
         dangerouslySetInnerHTML={{ __html: renderMarkdown(note.content) }} />
       {lb && <Lightbox images={lb.images} index={lb.index} onClose={() => setLb(null)} />}
       <div className="foot-split">
-        {(note.weather || note.location) && (
+        {(note.weather || note.location || note.expiresAt) && (
           <span className="foot-env">
             {note.weather && <WeatherBadge text={note.weather} />}
             {note.location && <LocationBadge text={note.location} />}
+            {note.expiresAt && <span className="muted tiny" title={new Date(note.expiresAt).toLocaleString()}>{Math.max(1, Math.ceil((note.expiresAt - Date.now()) / 86400000))}天后删除</span>}
           </span>
         )}
         <span className="foot-acts">
