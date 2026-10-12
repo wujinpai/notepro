@@ -316,6 +316,7 @@ export function AuthDialog({ site, onClose, onAuthed }: { site: SiteInfo; onClos
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
+  const [inviteCode, setInviteCode] = useState("");
   const cd = useCountdown();
 
   const freshSlider = () => { setTicket(""); setSliderKey((k) => k + 1); };
@@ -348,7 +349,7 @@ export function AuthDialog({ site, onClose, onAuthed }: { site: SiteInfo; onClos
       });
     } else if (mode === "register") {
       void wrap(async () => {
-        const d = await api.post<{ user: UserInfo }>("/api/auth/register", { username: username.trim(), email: email.trim(), code: code.trim(), password, ticket });
+        const d = await api.post<{ user: UserInfo }>("/api/auth/register", { username: username.trim(), email: email.trim(), code: code.trim(), password, ticket, inviteCode: inviteCode.trim() });
         onAuthed(d.user); onClose();
       });
     } else {
@@ -379,6 +380,9 @@ export function AuthDialog({ site, onClose, onAuthed }: { site: SiteInfo; onClos
         <div className="form">
           <label>用户名<input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="2-24 位，字母/数字/下划线/中文" autoComplete="username" /></label>
           <label>邮箱<input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="用于接收验证码" autoComplete="email" /></label>
+          {site.inviteOnly && (
+            <label>邀请码<input value={inviteCode} onChange={(e) => setInviteCode(e.target.value.toUpperCase())} placeholder="请输入邀请码" autoComplete="off" /></label>
+          )}
           <label>邮箱验证码
             <span className="code-row">
               <input value={code} onChange={(e) => setCode(e.target.value)} placeholder="6 位验证码" inputMode="numeric" />

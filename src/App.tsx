@@ -70,7 +70,7 @@ export default function App() {
   const { theme, toggle } = useTheme();
   // 初始站点信息来自服务端注入/本地缓存，未就绪时 name 留空：品牌区只渲染中性占位，不闪默认「己素」与蓝 N
   const [site, setSite] = useState<SiteInfo>(() => {
-    const s = bootSite() ?? { name: "", subtitle: "", description: "", keywords: "", footer: "", icp: "", logo: "", accent: "", registerOpen: true, oauthProviders: [] };
+    const s = bootSite() ?? { name: "", subtitle: "", description: "", keywords: "", footer: "", icp: "", logo: "", accent: "", registerOpen: true, inviteOnly: false, oauthProviders: [] };
     if (s.accent) applyAccent(s.accent);
     return s;
   });
@@ -137,7 +137,7 @@ export default function App() {
       if (meta && d.description) meta.setAttribute("content", d.description);
     }).catch(() => {
       // 接口异常时才落默认品牌（正常路径首帧已由注入/缓存给出真值，不会闪）
-      setSite((s) => (s.name ? s : { name: "己素", subtitle: "Jisu", description: "", keywords: "", footer: "", icp: "", logo: "", accent: "", registerOpen: true, oauthProviders: [] }));
+      setSite((s) => (s.name ? s : { name: "己素", subtitle: "Jisu", description: "", keywords: "", footer: "", icp: "", logo: "", accent: "", registerOpen: true, inviteOnly: false, oauthProviders: [] }));
     });
     refreshUser();
     // OAuth 回调带回的消息/成功标记

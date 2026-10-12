@@ -584,3 +584,17 @@ th { color: var(--muted); font-weight: 500; font-size: 13px; }
 /* 海报捕获：零高裁剪容器包裹常规流节点（屏外 fixed 会使 html-to-image 克隆画出画布 → 空白图） */
 .share-poster-fail { display: flex; flex-direction: column; align-items: center; gap: 12px;
   padding: 36px 16px; color: var(--muted); }
+
+/* 回顶部悬浮按钮：首页滚动后显示 */
+.back-top { position: fixed; right: 16px; bottom: calc(var(--footer-h) + env(safe-area-inset-bottom) + 16px); z-index: 45;
+  width: 44px; height: 44px; border-radius: 50%; border: 1px solid var(--border);
+  background: var(--card); color: var(--muted); cursor: pointer; display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  opacity: 0; transform: translateY(12px); pointer-events: none;
+  transition: opacity 0.25s ease, transform 0.25s ease, color 0.2s ease; }
+.back-top.show { opacity: 1; transform: none; pointer-events: auto; }
+.back-top:hover { color: var(--accent); }
+
+/* 邀请码状态 */
+.tag-used { color: #8a8478; }
+.tag-unused { color: #2b8a3e; font-weight: 600; }

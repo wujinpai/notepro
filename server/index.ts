@@ -60,6 +60,7 @@ function sitePayload() {
     logo: getSetting("site_logo", ""),
     accent: getSetting("site_accent", ""),
     registerOpen: getSetting("site_register_open", "1") === "1",
+    inviteOnly: getSetting("site_invite_only", "0") === "1",
     oauthProviders: oauth,
   };
 }
@@ -125,9 +126,32 @@ app.post("/api/auth/register", rateLimit(20, 60_000, "register"), (req, res) => 
   if (!verifyEmailCode(email, "register", code)) return fail(res, 400, "邮箱验证码错误或已过期");
   const count = (db.prepare("SELECT COUNT(*) c FROM users").get() as { c: number }).c;
   const role = count === 0 ? "admin" : "user";
-  const info = db.prepare("INSERT INTO users(username,email,password_hash,nickname,role,created_at) VALUES(?,?,?,?,?,?)")
-    .run(username, email, hashPassword(password), username, role, Date.now());
-  const user = getUserById(Number(info.lastInsertRowid))!;
+  // 邀请码注册：开启后（且已有用户）必须提供未使用的邀请码，一个码对应一个用户
+  const inviteOnly = getSetting("site_invite_only", "0") === "1" && count > 0;
+  const inviteCode = String(req.body?.inviteCode || "").toUpperCase().trim();
+  let user: ReturnType<typeof getUserById>;
+  try {
+    db.exec("BEGIN IMMEDIATE");
+    if (inviteOnly) {
+      if (!inviteCode) throw new Error("请填写邀请码");
+      const ic = db.prepare("SELECT code FROM invite_codes WHERE code=? AND used_at IS NULL").get(inviteCode) as { code: string } | undefined;
+      if (!ic) throw new Error("邀请码无效或已被使用");
+    }
+    const info = db.prepare("INSERT INTO users(username,email,password_hash,nickname,role,created_at) VALUES(?,?,?,?,?,?)")
+      .run(username, email, hashPassword(password), username, role, Date.now());
+    const uid = Number(info.lastInsertRowid);
+    if (inviteOnly) {
+      const r = db.prepare("UPDATE invite_codes SET used_at=?, used_by=? WHERE code=? AND used_at IS NULL").run(Date.now(), uid, inviteCode);
+      if (r.changes === 0) throw new Error("邀请码已被使用");
+    }
+    db.exec("COMMIT");
+    user = getUserById(uid)!;
+  } catch (e) {
+    try { db.exec("ROLLBACK"); } catch { /* ignore */ }
+    const msg = (e as Error).message;
+    if (msg === "请填写邀请码" || msg === "邀请码无效或已被使用" || msg === "邀请码已被使用") return fail(res, 400, msg);
+    throw e;
+  }
   setSessionCookie(res, createSession(req, user.id));
   ok(res, { user: publicUser(user, true) });
 });
@@ -764,6 +788,7 @@ app.get("/api/admin/site", requireAdmin, (_req, res) => {
     logo: getSetting("site_logo", ""), url: getSetting("site_url", ""),
     accent: getSetting("site_accent", ""),
     registerOpen: getSetting("site_register_open", "1") === "1",
+    inviteOnly: getSetting("site_invite_only", "0") === "1",
     oauthShowLogin: getSetting("oauth_show_login", "1") === "1",
   });
 });
@@ -780,10 +805,44 @@ app.put("/api/admin/site", requireAdmin, (req, res) => {
   const accent = str("accent", 7);
   setSetting("site_accent", /^#[0-9a-fA-F]{6}$/.test(accent) ? accent : "");
   setSetting("site_register_open", b.registerOpen === false ? "0" : "1");
+  if (b.inviteOnly !== undefined) setSetting("site_invite_only", b.inviteOnly ? "1" : "0");
   setSetting("oauth_show_login", b.oauthShowLogin === false ? "0" : "1");
   ok(res);
 });
 app.post("/api/admin/logo", requireAdmin, upload.single("file"), uploadErr, (req: Request, res: Response) => handleUpload(req, res, "site"));
+
+// ---------- 邀请码 ----------
+const INVITE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"; // 去掉易混淆的 0/O/1/I/L
+const genInviteCode = (): string => {
+  let s = "";
+  for (let i = 0; i < 10; i++) s += INVITE_ALPHABET[Math.floor(Math.random() * INVITE_ALPHABET.length)];
+  return s;
+};
+app.get("/api/admin/invite-codes", requireAdmin, (_req, res) => {
+  const rows = db.prepare(
+    `SELECT c.code, c.created_at, c.used_at, c.used_by, u.username AS used_by_name
+     FROM invite_codes c LEFT JOIN users u ON u.id = c.used_by
+     ORDER BY c.created_at DESC LIMIT 500`
+  ).all() as { code: string; created_at: number; used_at: number | null; used_by: number | null; used_by_name: string | null }[];
+  ok(res, { codes: rows, inviteOnly: getSetting("site_invite_only", "0") === "1" });
+});
+app.post("/api/admin/invite-codes", requireAdmin, rateLimit(30, 60_000, "invite-gen"), (req, res) => {
+  const count = Math.max(1, Math.min(100, Math.floor(Number(req.body?.count) || 1)));
+  const made: string[] = [];
+  const ins = db.prepare("INSERT OR IGNORE INTO invite_codes(code, created_at) VALUES(?, ?)");
+  for (let i = 0; i < count && made.length < count; i++) {
+    const code = genInviteCode();
+    const r = ins.run(code, Date.now());
+    if (r.changes > 0) made.push(code);
+  }
+  ok(res, { codes: made });
+});
+app.delete("/api/admin/invite-codes/:code", requireAdmin, (req, res) => {
+  const code = String(req.params.code || "").toUpperCase().trim();
+  const r = db.prepare("DELETE FROM invite_codes WHERE code=? AND used_at IS NULL").run(code);
+  if (r.changes === 0) return fail(res, 404, "邀请码不存在或已使用");
+  ok(res);
+});
 
 app.get("/api/admin/smtp", requireAdmin, (_req, res) => {
   ok(res, {

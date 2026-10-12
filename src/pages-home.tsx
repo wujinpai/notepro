@@ -117,6 +117,15 @@ export function HomePage({ user, site, onOpenNote, onComment, q, onSearch, tag, 
 
   const [calOpen, setCalOpen] = useState(false);
 
+  // 回顶部悬浮按钮：滚动超过一屏后显示
+  const [showTop, setShowTop] = useState(false);
+  useEffect(() => {
+    const onScroll = () => setShowTop(window.scrollY > 500);
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
   // 列表渲染就绪通知 App：返回首页时借此恢复离开前的滚动位置（每 key 只通知一次）
   const settledKeyRef = useRef("");
   useEffect(() => {
@@ -210,6 +219,12 @@ export function HomePage({ user, site, onOpenNote, onComment, q, onSearch, tag, 
           </div>
         </div>
       </aside>
+      <button type="button" className={`back-top${showTop ? " show" : ""}`} aria-label="回到顶部"
+        onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}>
+        <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M12 19V5m0 0l-6 6m6-6l6 6" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
     </div>
   );
 }

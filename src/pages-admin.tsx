@@ -2,11 +2,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api, fmtTime, type NoteInfo, type UserInfo } from "./api";
 import { Avatar } from "./components";
 
-type AdminTab = "overview" | "users" | "notes" | "site" | "smtp" | "oauth" | "weather";
+type AdminTab = "overview" | "users" | "notes" | "site" | "smtp" | "oauth" | "weather" | "invite";
 
 export function AdminPage({ user, embedded = false }: { user: UserInfo; embedded?: boolean }) {
   const [tab, setTab] = useState<AdminTab>("overview");
-  const tabs: [AdminTab, string][] = [["overview", "概览"], ["users", "用户管理"], ["notes", "内容管理"], ["site", "站点设置"], ["smtp", "邮箱设置"], ["oauth", "第三方登录"], ["weather", "天气与位置"]];
+  const tabs: [AdminTab, string][] = [["overview", "概览"], ["users", "用户管理"], ["notes", "内容管理"], ["site", "站点设置"], ["smtp", "邮箱设置"], ["oauth", "第三方登录"], ["weather", "天气与位置"], ["invite", "邀请码"]];
   const content = (
     <>
       {tab === "overview" && <Overview />}
@@ -16,6 +16,7 @@ export function AdminPage({ user, embedded = false }: { user: UserInfo; embedded
       {tab === "smtp" && <SmtpSettings />}
       {tab === "oauth" && <OauthSettings />}
       {tab === "weather" && <GeoWeatherSettings />}
+      {tab === "invite" && <InviteCodes />}
     </>
   );
   // 嵌入用户中心：不再套一层 me-layout，只留子标签行 + 内容（外层导航由用户中心承担）
@@ -500,6 +501,80 @@ function OauthSettings() {
         );
       })}
       {msg && <p className="ok-text">{msg}</p>}
+    </div>
+  );
+}
+
+// ---------- 邀请码 ----------
+interface InviteCodeRow { code: string; created_at: number; used_at: number | null; used_by: number | null; used_by_name: string | null }
+function InviteCodes() {
+  const [rows, setRows] = useState<InviteCodeRow[]>([]);
+  const [inviteOnly, setInviteOnly] = useState(false);
+  const [count, setCount] = useState(5);
+  const [msg, setMsg] = useState("");
+  const load = useCallback(async () => {
+    try {
+      const d = await api.get<{ codes: InviteCodeRow[]; inviteOnly: boolean }>("/api/admin/invite-codes");
+      setRows(d.codes); setInviteOnly(d.inviteOnly);
+    } catch (e) { setMsg((e as Error).message); }
+  }, []);
+  useEffect(() => { void load(); }, [load]);
+  const toggle = async (v: boolean) => {
+    setInviteOnly(v);
+    try { await api.put("/api/admin/site", { inviteOnly: v }); setMsg(v ? "已开启邀请码注册" : "已关闭邀请码注册"); }
+    catch (e) { setMsg((e as Error).message); setInviteOnly(!v); }
+  };
+  const gen = async () => {
+    try {
+      const d = await api.post<{ codes: string[] }>("/api/admin/invite-codes", { count });
+      setMsg(`已生成 ${d.codes.length} 个邀请码`);
+      await load();
+    } catch (e) { setMsg((e as Error).message); }
+  };
+  const del = async (code: string) => {
+    if (!confirm(`删除邀请码 ${code}？`)) return;
+    try { await api.del(`/api/admin/invite-codes/${code}`); setMsg("已删除"); await load(); }
+    catch (e) { setMsg((e as Error).message); }
+  };
+  const copy = async (code: string) => {
+    try { await navigator.clipboard.writeText(code); setMsg(`已复制 ${code}`); }
+    catch { setMsg("复制失败"); }
+  };
+  return (
+    <div className="panel">
+      <h3>邀请码</h3>
+      <div className="form">
+        <label className="check"><input type="checkbox" checked={inviteOnly} onChange={(e) => void toggle(e.target.checked)} /> 开启邀请码注册（开启后，新用户注册必须填写未使用的邀请码）</label>
+        <label>生成数量
+          <span className="row-gap">
+            <input type="number" min={1} max={100} value={count} onChange={(e) => setCount(Math.max(1, Math.min(100, Number(e.target.value) || 1)))} style={{ width: 90 }} />
+            <button type="button" className="btn btn-primary btn-sm" onClick={() => void gen()}>生成邀请码</button>
+          </span>
+        </label>
+        <p className="muted tiny">一个邀请码只能注册一个用户；已使用的邀请码会标记使用者，不可删除。</p>
+      </div>
+      {msg && <p className="ok-text">{msg}</p>}
+      <div className="table-wrap">
+        <table className="table">
+          <thead><tr><th>邀请码</th><th>生成时间</th><th>状态</th><th>操作</th></tr></thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.code}>
+                <td><code>{r.code}</code></td>
+                <td className="muted tiny">{fmtTime(r.created_at)}</td>
+                <td>{r.used_at ? <span className="tag-used">已使用{r.used_by_name ? ` · @${r.used_by_name}` : ""}</span> : <span className="tag-unused">未使用</span>}</td>
+                <td>
+                  <span className="row-gap">
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => void copy(r.code)}>复制</button>
+                    {!r.used_at && <button type="button" className="btn btn-danger btn-sm" onClick={() => void del(r.code)}>删除</button>}
+                  </span>
+                </td>
+              </tr>
+            ))}
+            {rows.length === 0 && <tr><td colSpan={4} className="muted">暂无邀请码</td></tr>}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
