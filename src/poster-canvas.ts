@@ -268,7 +268,11 @@ export async function loadBitmap(url: string, timeoutMs = 30000): Promise<ImageB
       clearTimeout(timer);
     }
     if (typeof createImageBitmap === "function") {
-      return await createImageBitmap(blob);
+      try {
+        return await createImageBitmap(blob);
+      } catch {
+        /* 某些浏览器对特定编码（如部分 webp）解码失败，继续走 Image 兜底 */
+      }
     }
     // 回退：HTMLImageElement
     const objUrl = URL.createObjectURL(blob);

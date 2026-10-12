@@ -577,6 +577,31 @@ app.delete("/api/comments/:id", requireAuth, (req, res) => {
   ok(res);
 });
 const countNoteImages = (content: string) => ((content || "").match(/!\[[^\]]*\]\([^)\s]+\)/g) || []).length;
+// 正文中的本地上传图路径（/uploads/images/xxx），用于删除笔记/移除图片时清理孤儿文件
+const localImagePathsOf = (content: string): string[] => {
+  const out = new Set<string>();
+  const re = /!\[[^\]]*\]\((\/uploads\/images\/[^)\s]+)\)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(content || ""))) out.add(m[1]);
+  return [...out];
+};
+// 删除不再被任何笔记引用的本地图片（文件 + media 记录）。excludeNoteId 用于"编辑移除"场景：
+// 只清理旧内容有、新内容没有的图片，且该图片未被其他笔记引用，避免误删。
+const cleanupOrphanedImages = (paths: string[], excludeNoteId?: number) => {
+  for (const p of paths) {
+    try {
+      const like = `%${p.replace(/[%_\\]/g, (c) => `\\${c}`)}%`;
+      const sql = excludeNoteId === undefined
+        ? "SELECT COUNT(*) c FROM notes WHERE content LIKE ? ESCAPE '\\'"
+        : "SELECT COUNT(*) c FROM notes WHERE id != ? AND content LIKE ? ESCAPE '\\'";
+      const args = excludeNoteId === undefined ? [like] : [excludeNoteId, like];
+      const ref = (db.prepare(sql).get(...args) as { c: number }).c;
+      if (ref > 0) continue; // 仍被其他笔记引用，保留
+      try { unlinkSync(join(STORAGE_DIR, p.replace("/uploads/", ""))); } catch { /* 文件已不存在 */ }
+      db.prepare("DELETE FROM media WHERE path=?").run(p);
+    } catch { /* 清理失败不影响主流程 */ }
+  }
+};
 app.post("/api/notes", requireAuth, (req, res) => {
   const u = authedUser(req);
   const title = String(req.body?.title || "").trim().slice(0, 120);
@@ -604,14 +629,20 @@ app.put("/api/notes/:id", requireAuth, (req, res) => {
       String(req.body?.weather ?? n.weather).slice(0, 30), String(req.body?.location ?? n.location).slice(0, 60),
       req.body?.visibility === "private" ? "private" : "public", req.body?.pinned ? 1 : 0, req.body?.archived ? 1 : 0,
       req.body?.allowComments !== undefined ? (req.body.allowComments ? 1 : 0) : n.allow_comments, Date.now(), n.id);
+  // 编辑时删掉的图片：若不再被其他笔记引用，删除文件释放空间
+  const removed = localImagePathsOf(n.content).filter((p) => !localImagePathsOf(newContent).includes(p));
+  if (removed.length) cleanupOrphanedImages(removed, n.id);
   ok(res, { note: noteJson(db.prepare("SELECT * FROM notes WHERE id=?").get(n.id) as unknown as NoteRow) });
 });
 app.delete("/api/notes/:id", requireAuth, (req, res) => {
   const u = authedUser(req);
   const n = db.prepare("SELECT * FROM notes WHERE id=?").get(Number(req.params.id)) as NoteRow | undefined;
   if (!n || (n.user_id !== u.id && u.role !== "admin")) return fail(res, 404, "笔记不存在");
+  const imgPaths = localImagePathsOf(n.content);
   db.prepare("DELETE FROM comments WHERE note_id=?").run(n.id);
   db.prepare("DELETE FROM notes WHERE id=?").run(n.id);
+  // 笔记删除后，其本地图片若不再被其他笔记引用，删除文件释放空间
+  if (imgPaths.length) cleanupOrphanedImages(imgPaths);
   ok(res);
 });
 app.get("/api/me/notes", requireAuth, (req, res) => {
