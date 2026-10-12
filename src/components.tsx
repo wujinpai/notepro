@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
-import { toPng } from "html-to-image";
 import { api, fmtTime, type NoteInfo, type SiteInfo, type UserInfo } from "./api";
 import { excerpt, imagesOf } from "./md";
-import { isSameOriginUrl, isBlankPng, proxyImageUrl } from "./poster-util";
+import { isSameOriginUrl, proxyImageUrl } from "./poster-util";
+import { renderPoster, loadBitmap, type PosterAssets } from "./poster-canvas";
 
 // ---------- 扁平线条图标（stroke=currentColor，全站统一） ----------
 const line = {
@@ -422,8 +422,6 @@ export function AuthDialog({ site, onClose, onAuthed }: { site: SiteInfo; onClos
 }
 
 // ---------- 分享弹窗：链接 + 卡片海报（含右下角二维码） + 保存图片 ----------
-// 1px 透明 PNG：toPng 兜底 imagePlaceholder（失败图已在 settle 阶段剔除，此处绝不出现灰盒子）
-const TRANSPARENT_PX = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
 export interface ShareInfo { token: string; url: string; isAuthor: boolean }
 export function ShareDialog({ note, brand, onClose }: { note: NoteInfo; brand?: string; onClose: () => void }) {
   const [info, setInfo] = useState<ShareInfo | null>(null);
@@ -436,10 +434,7 @@ export function ShareDialog({ note, brand, onClose }: { note: NoteInfo; brand?: 
   const [saveMsg, setSaveMsg] = useState("");
   const [genKey, setGenKey] = useState(0); // 递增 → 重新生成海报
   const [genState, setGenState] = useState<"idle" | "working" | "done" | "fail">("idle");
-  const [badImgs, setBadImgs] = useState<number[]>([]); // 加载失败的图下标 → 直接从九宫格剔除（无占位）
-  const [avatarBad, setAvatarBad] = useState(false); // 头像代理失败 → 首字母兜底
   const inputRef = useRef<HTMLInputElement>(null);
-  const posterRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let dead = false;
@@ -454,133 +449,65 @@ export function ShareDialog({ note, brand, onClose }: { note: NoteInfo; brand?: 
     QRCode.toDataURL(info.url, { width: 220, margin: 1 }).then(setQr).catch(() => setQr(""));
   }, [info]);
 
-  // 海报图片预加载：弹窗挂载即开始（与分享链接/二维码并行），避免冷缓存大图在生成阶段才开始下载。
-  // 预加载对象保存在 ref 防止被 GC，浏览器缓存命中后 settle/toPng 不再重复走网络。
-  const preloadRef = useRef<HTMLImageElement[]>([]);
-  useEffect(() => {
-    const urls = new Set<string>();
-    for (const s of imagesOf(note.content).slice(0, 9)) urls.add(isSameOriginUrl(s) ? s : proxyImageUrl(s));
-    const ra = note.author?.avatar || "";
-    if (ra) urls.add(isSameOriginUrl(ra) ? ra : proxyImageUrl(ra));
-    preloadRef.current = [...urls].map((u) => { const im = new Image(); im.src = u; return im; });
-    return () => { preloadRef.current = []; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [note.id]);
-
-  // 海报生成：二维码就绪且海报 DOM 挂载后，用 html-to-image 导出 2x PNG。
-  // 捕获节点必须在常规文档流中真实绘制：html-to-image 会把节点全部计算样式
-  // （含 position/left）内联到克隆体再塞进 SVG foreignObject，屏外 fixed 会让克隆体
-  // 画到画布之外 → 空白图但 resolve。因此用零高裁剪容器包裹，而非 fixed 偏移。
+  // 海报生成：Canvas 手绘，不依赖 html-to-image 的 SVG foreignObject，
+  // 在 iOS Safari / 微信 WebView / 桌面 Chrome 表现一致。
+  // 图片经 fetch 取字节（外链走服务端代理转同源），失败的图直接剔除不留占位。
   useEffect(() => {
     if (!qr) return;
     let dead = false;
-    setGenState("working"); setPosterPng(""); setSaveMsg(""); setBadImgs([]); setAvatarBad(false);
-    // 外链图（正文 Markdown 外链、OAuth 外链头像）先改写为服务端代理地址再等待加载；
-    // 全部 <img> settle：load 即过；error 立即记为坏图；仍在加载中的最多等 30s
-    //（手机慢网络下原图可达数 MB，且服务端代理抓取慢图床也可能耗时十几秒，
-    // 超时太短会把还没下完的好图误杀）。坏图直接剔除
-    //（九宫格按剩余重排，不留占位），30s 后仍未完成的才剔除。
-    const settleImages = async (node: HTMLElement) => {
-      node.querySelectorAll("img").forEach((el) => {
-        const img = el as HTMLImageElement;
-        const s = img.getAttribute("src") || "";
-        if (s && !isSameOriginUrl(s) && !s.startsWith("/api/proxy-image")) img.src = proxyImageUrl(s);
-      });
-      const imgs = Array.from(node.querySelectorAll("img"));
-      // 等待图片真正可解码：iOS 上图片可能 complete=true 但尚未解码完（naturalWidth=0），
-      // 此时若直接判失败会把好图误杀。用 img.decode() 等待解码完成，30s 超时或解码失败
-      // 再由随后的 complete/naturalWidth 复核。
-      await Promise.all(
-        imgs.map((img) =>
-          (async () => {
-            const el = img as HTMLImageElement;
-            if (el.complete && el.naturalWidth > 0) return;
-            try {
-              await Promise.race([
-                el.decode(),
-                new Promise((_, rej) => setTimeout(() => rej(new Error("decode-timeout")), 30000)),
-              ]);
-            } catch {
-              /* 解码失败或超时：由随后的复核判定 */
-            }
-          })()
-        )
-      );
-      const bad: number[] = [];
-      let avBad = false;
-      node.querySelectorAll("img").forEach((el) => {
-        const img = el as HTMLImageElement;
-        if (img.complete && img.naturalWidth > 0) return;
-        if (img.hasAttribute("data-avatar")) { avBad = true; return; }
-        const ph = img.getAttribute("data-ph");
-        if (ph != null) { bad.push(Number(ph)); return; }
-        img.remove(); // 正文内联坏图：直接移除该图位，不留占位
-      });
-      if ((bad.length || avBad) && !dead) {
-        setBadImgs(bad);
-        setAvatarBad(avBad);
-        await new Promise((r) => setTimeout(r, 80)); // 等剔除后 DOM 提交
-      }
-      // 海报图降采样：原图可达数 MB，iOS 上超大 dataURL 会使 toPng 空白/失败。
-      // 按实际显示尺寸（clientWidth × pixelRatio，上限 1200px）重绘为 PNG dataURL
-      //（保留透明通道），九宫格小图无需大分辨率；逐张处理以降低 iOS 内存峰值。
-      const gridImgs = Array.from(node.querySelectorAll("img"));
-      for (const el of gridImgs) {
-        if (dead) return;
-        const img = el as HTMLImageElement;
-        const w = img.naturalWidth, h = img.naturalHeight;
-        if (!w || !h) continue;
-        const dispW = img.clientWidth || 0;
-        const target = Math.min(1200, Math.max(300, Math.round(dispW * 2) || 600));
-        const scale = Math.min(1, target / Math.max(w, h));
-        if (scale >= 1) continue;
-        try {
-          const c = document.createElement("canvas");
-          c.width = Math.max(1, Math.round(w * scale));
-          c.height = Math.max(1, Math.round(h * scale));
-          const ctx = c.getContext("2d");
-          if (!ctx) continue;
-          ctx.drawImage(img, 0, 0, c.width, c.height);
-          img.src = c.toDataURL("image/png");
-          await img.decode().catch(() => {});
-        } catch { /* 保持原图 */ }
-      }
-    };
-    const run = async (): Promise<string | null> => {
-      try {
-        const node = posterRef.current;
-        if (!node || dead) return null;
-        for (let i = 0; i < 40 && node.scrollHeight === 0 && !dead; i++) {
-          await new Promise((r) => setTimeout(r, 50)); // 等待真实布局尺寸
-        }
-        if (!node || node.scrollHeight === 0 || dead) return null;
-        await settleImages(node);
-        if (dead) return null;
-        try { await (document as Document).fonts?.ready; } catch { /* ignore */ }
-        await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-        if (dead) return null;
-        const url = await toPng(node, { pixelRatio: 2, cacheBust: true, imagePlaceholder: TRANSPARENT_PX });
-        if (dead) return null;
-        if (await isBlankPng(url)) return null; // 空白图视为失败
-        return url;
-      } catch {
-        return null; // 抛错转为空，走统一重试/失败态
-      }
-    };
+    setGenState("working"); setPosterPng(""); setSaveMsg("");
+    const sameUrl = (s: string) => (isSameOriginUrl(s) ? s : proxyImageUrl(s));
     (async () => {
       try {
-        let url = await run();
-        if (!url && !dead) {
-          await new Promise((r) => setTimeout(r, 600));
-          if (!dead) url = await run(); // 自动重试一次
-        }
-        if (!url) throw new Error("poster-empty");
-        if (!dead) { setPosterPng(url); setGenState("done"); }
+        const imgUrls = imagesOf(note.content).slice(0, 9).map(sameUrl);
+        const rawAvatar = note.author?.avatar || "";
+        const qrP = loadBitmap(qr);
+        const avP = rawAvatar ? loadBitmap(sameUrl(rawAvatar)) : Promise.resolve(null);
+        const imgPs = imgUrls.map((u) => loadBitmap(u));
+        const [qrBmp, avBmp, ...imgBmps] = await Promise.all([qrP, avP, ...imgPs]);
+        if (dead) return;
+        const assets: PosterAssets = {
+          images: imgBmps.filter((b): b is ImageBitmap | HTMLImageElement => !!b),
+          avatar: avBmp,
+          qr: qrBmp,
+        };
+        const url = await renderPoster(
+          {
+            title: note.title, content: note.content, tags: note.tags,
+            weather: note.weather, location: note.location, createdAt: note.createdAt,
+            author: note.author ? { nickname: note.author.nickname, username: note.author.username, avatar: note.author.avatar } : null,
+          },
+          brand || "",
+          assets
+        );
+        if (dead) return;
+        // 空白检测：抽样像素方差，过低视为生成失败
+        let blank = false;
+        try {
+          const chk = await loadBitmap(url, 5000);
+          if (chk) {
+            const c = document.createElement("canvas");
+            c.width = 32; c.height = 32;
+            const cx = c.getContext("2d", { willReadFrequently: true });
+            if (cx) {
+              const iw = (chk as ImageBitmap).width || 32, ih = (chk as ImageBitmap).height || 32;
+              cx.drawImage(chk, 0, 0, iw, ih, 0, 0, 32, 32);
+              const d = cx.getImageData(0, 0, 32, 32).data;
+              let diff = 0;
+              for (let i = 0; i < d.length; i += 32) diff += Math.abs(d[i] - d[0]) + Math.abs(d[i + 1] - d[1]) + Math.abs(d[i + 2] - d[2]);
+              blank = diff < 2000;
+            }
+            if ("close" in chk) (chk as ImageBitmap).close();
+          }
+        } catch { /* 检测失败则视为非空白 */ }
+        if (blank) throw new Error("poster-blank");
+        setPosterPng(url); setGenState("done");
       } catch {
         if (!dead) setGenState("fail");
       }
     })();
     return () => { dead = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [qr, genKey]);
 
   const copy = async () => {
@@ -627,13 +554,6 @@ export function ShareDialog({ note, brand, onClose }: { note: NoteInfo; brand?: 
     }
   };
 
-  const imgs = imagesOf(note.content).slice(0, 9);
-  // 剔除加载失败的图后剩余图片（九宫格按剩余数自然重排，不留占位）
-  const visibleImgs = imgs.map((src, i) => ({ src, i })).filter(({ i }) => !badImgs.includes(i));
-  // OAuth 头像可能是外链（GitHub/QQ）：经服务端代理加载，失败则首字母兜底
-  const rawAvatar = note.author?.avatar || "";
-  const avatarSrc = rawAvatar ? (isSameOriginUrl(rawAvatar) ? rawAvatar : proxyImageUrl(rawAvatar)) : "";
-  const avatarLetter = (note.author?.nickname || "用户").slice(0, 1).toUpperCase();
   const regen = () => setGenKey((k) => k + 1);
 
   return (
@@ -668,51 +588,6 @@ export function ShareDialog({ note, brand, onClose }: { note: NoteInfo; brand?: 
             <span className="muted tiny">任何人凭此链接可查看{note.visibility === "private" ? "这篇私密独白" : "这篇独白"}</span>
             {info.isAuthor && <button type="button" className="btn btn-danger btn-sm" disabled={busy} onClick={() => void reset()}>重置链接</button>}
           </div>
-          {/* 海报捕获节点：常规文档流 + 零高裁剪容器（屏外 fixed 会使 html-to-image 克隆画出画布 → 空白图） */}
-          {qr && (
-            <div className="poster-capture-wrap" aria-hidden="true">
-            <div ref={posterRef} className="poster-capture">
-              <div className="poster">
-                <div className="poster-head">
-                  {avatarSrc && !avatarBad ? (
-                    <img className="avatar" style={{ width: 96, height: 96 }} src={avatarSrc} data-avatar="1" alt={note.author?.nickname || "用户"} />
-                  ) : (
-                    <span className="avatar avatar-fallback" style={{ width: 96, height: 96, fontSize: 40 }}>{avatarLetter}</span>
-                  )}
-                  <div className="poster-meta">
-                    <strong>{note.author?.nickname || "用户"}</strong>
-                    <span>@{note.author?.username} · {fmtTime(note.createdAt)}</span>
-                  </div>
-                </div>
-                {(note.weather || note.location) && (
-                  <div className="poster-env">
-                    {note.weather && <WeatherBadge text={note.weather} />}
-                    {note.location && <LocationBadge text={note.location} />}
-                  </div>
-                )}
-                {note.title && <h3 className="poster-title">{note.title}</h3>}
-                {excerpt(note.content, 300) && <p className="poster-excerpt" dangerouslySetInnerHTML={{ __html: excerpt(note.content, 300) }} />}
-                {visibleImgs.length > 0 && (
-                  <div className={`poster-imgs cols-${visibleImgs.length === 1 ? 1 : visibleImgs.length <= 4 ? 2 : 3}`}>
-                    {visibleImgs.map(({ src, i }) => (
-                      <img key={i} src={isSameOriginUrl(src) ? src : proxyImageUrl(src)} alt="" data-ph={i} />
-                    ))}
-                  </div>
-                )}
-                {note.tags.length > 0 && (
-                  <div className="poster-tags">{note.tags.map((t) => <span key={t} className="poster-chip">#{t}</span>)}</div>
-                )}
-                <div className="poster-foot">
-                  <span className="poster-brand">{brand || "己素 · 笔墨留香"}</span>
-                  <div className="poster-qr">
-                    <img src={qr} alt="" />
-                    <span>扫码打开这篇独白</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-            </div>
-          )}
         </>
       )}
     </Modal>
