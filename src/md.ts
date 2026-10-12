@@ -1,6 +1,14 @@
 // 安全 Markdown 渲染：先转义全部 HTML，再按语法生成标签；链接/图片仅允许 http(s) 与站内 /uploads/
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 const safeUrl = (u: string) => (/^(https?:\/\/|\/uploads\/)/i.test(u) ? u : "");
+const isVideoUrl = (u: string) => /\.(mp4|webm|mov)(\?.*)?$/i.test(u);
+const mediaTag = (url: string, alt: string) => {
+  const u = safeUrl(url);
+  if (!u) return "";
+  return isVideoUrl(u)
+    ? `<video src="${u}" controls preload="metadata" playsinline></video>`
+    : `<img src="${u}" alt="${alt}" loading="lazy"/>`;
+};
 
 function inline(s: string): string {
   // s 已经过 esc；按占位符保护行内代码与图片/链接
@@ -12,8 +20,8 @@ function inline(s: string): string {
   s = s.replace(/\[color=#([0-9a-fA-F]{6})\]([^\n]*?)\[\/color\]/g, (_m, hex, inner) =>
     keep(`<span style="color:#${hex.toLowerCase()}">${inner}</span>`));
   s = s.replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, (_m, alt, url) => {
-    const u = safeUrl(url);
-    return u ? keep(`<img src="${u}" alt="${alt}" loading="lazy"/>`) : keep(esc(alt));
+    const html = mediaTag(url, alt);
+    return html ? keep(html) : keep(esc(alt));
   });
   s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_m, t, url) => {
     const u = safeUrl(url);
@@ -48,7 +56,13 @@ export function renderMarkdown(src: string): string {
     const imgLine = line.trim().match(/^!\[([^\]]*)\]\(([^)\s]+)\)$/);
     if (imgLine && safeUrl(imgLine[2])) {
       closeList();
-      imgRun.push(`<img src="${imgLine[2]}" alt="${imgLine[1]}" loading="lazy"/>`);
+      // 视频不进九宫格，单独成段渲染
+      if (isVideoUrl(imgLine[2])) {
+        flushImgs();
+        out.push(`<div class="video-wrap">${mediaTag(imgLine[2], imgLine[1])}</div>`);
+      } else {
+        imgRun.push(`<img src="${imgLine[2]}" alt="${imgLine[1]}" loading="lazy"/>`);
+      }
       i++; continue;
     }
     const fence = line.match(/^```(\w*)\s*$/);
@@ -176,7 +190,7 @@ export function imagesOf(content: string): string[] {
   let m: RegExpExecArray | null;
   const src = content || "";
   while ((m = re.exec(src))) {
-    if (/^(https?:\/\/|\/uploads\/)/i.test(m[2])) out.push(m[2]);
+    if (/^(https?:\/\/|\/uploads\/)/i.test(m[2]) && !isVideoUrl(m[2])) out.push(m[2]);
   }
   return out;
 }
@@ -184,4 +198,8 @@ export function imagesOf(content: string): string[] {
 // 图片语法总数（上限校验用，与服务端同一正则口径）
 export function countImages(content: string): number {
   return ((content || "").match(/!\[[^\]]*\]\([^)\s]+\)/g) || []).length;
+}
+
+export function countVideos(content: string): number {
+  return ((content || "").match(/!\[[^\]]*\]\([^)\s]+\.(mp4|webm|mov)\)/gi) || []).length;
 }

@@ -61,6 +61,7 @@ function sitePayload() {
     accent: getSetting("site_accent", ""),
     registerOpen: getSetting("site_register_open", "1") === "1",
     inviteOnly: getSetting("site_invite_only", "0") === "1",
+    videoUpload: { enabled: videoUploadEnabled(), maxMb: Math.max(1, Math.min(100, Number(getSetting("upload_video_max_mb", "10")) || 10)) },
     oauthProviders: oauth,
   };
 }
@@ -312,24 +313,47 @@ app.get("/api/auth/oauth/:provider/callback", async (req, res) => {
 
 // ---------- 上传 ----------
 const ALLOWED_IMG: Record<string, string> = { "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp" };
+const ALLOWED_VIDEO: Record<string, string> = { "video/mp4": "mp4", "video/webm": "webm", "video/quicktime": "mov" };
+const VIDEO_DIR = join(STORAGE_DIR, "videos");
+if (!existsSync(VIDEO_DIR)) mkdirSync(VIDEO_DIR, { recursive: true });
+const videoUploadEnabled = () => getSetting("upload_video_enabled", "1") === "1";
+const videoMaxBytes = () => {
+  const mb = Math.max(1, Math.min(100, Number(getSetting("upload_video_max_mb", "10")) || 10));
+  return mb * 1024 * 1024;
+};
 const upload = multer({
   storage: multer.diskStorage({
-    destination: (_req, _file, cb) => cb(null, IMG_DIR),
+    destination: (_req, file, cb) => cb(null, file.mimetype.startsWith("video/") ? VIDEO_DIR : IMG_DIR),
     filename: (_req, file, cb) => {
-      const ext = ALLOWED_IMG[file.mimetype] || "png";
+      const ext = ALLOWED_IMG[file.mimetype] || ALLOWED_VIDEO[file.mimetype] || "bin";
       cb(null, `${Date.now()}_${Math.random().toString(36).slice(2, 10)}.${ext}`);
     },
   }),
-  limits: { fileSize: 5 * 1024 * 1024 },
+  limits: { fileSize: 100 * 1024 * 1024 }, // 绝对上限防滥用，真实限制在 handleUpload 按配置校验
   fileFilter: (_req, file, cb) => {
     const ext = extname(file.originalname).toLowerCase().replace(".", "");
     if (ALLOWED_IMG[file.mimetype] && ["png", "jpg", "jpeg", "gif", "webp"].includes(ext)) cb(null, true);
-    else cb(new Error("仅支持 PNG/JPG/GIF/WebP 图片"));
+    else if (ALLOWED_VIDEO[file.mimetype] && ["mp4", "webm", "mov"].includes(ext)) {
+      if (!videoUploadEnabled()) cb(new Error("视频上传已关闭"));
+      else cb(null, true);
+    }
+    else cb(new Error("仅支持 PNG/JPG/GIF/WebP 图片及 MP4/WebM/MOV 视频"));
   },
 });
 function handleUpload(req: Request, res: Response, kind: "note" | "avatar" | "site") {
-  if (!req.file) return fail(res, 400, "未收到图片文件");
-  const rel = `/uploads/images/${req.file.filename}`;
+  if (!req.file) return fail(res, 400, "未收到文件");
+  const isVideo = req.file.mimetype.startsWith("video/");
+  // 头像/站点 Logo 不接受视频
+  if (isVideo && kind !== "note") {
+    try { unlinkSync(req.file.path); } catch { /* ignore */ }
+    return fail(res, 400, "此处仅支持图片");
+  }
+  const maxBytes = isVideo ? videoMaxBytes() : 5 * 1024 * 1024;
+  if (req.file.size > maxBytes) {
+    try { unlinkSync(req.file.path); } catch { /* ignore */ }
+    return fail(res, 400, `文件超过 ${(maxBytes / 1024 / 1024).toFixed(0)}MB 限制`);
+  }
+  const rel = isVideo ? `/uploads/videos/${req.file.filename}` : `/uploads/images/${req.file.filename}`;
   db.prepare("INSERT INTO media(user_id,filename,path,mime,size,created_at) VALUES(?,?,?,?,?,?)")
     .run(authedUser(req).id, req.file.filename, rel, req.file.mimetype, req.file.size, Date.now());
   if (kind === "avatar") db.prepare("UPDATE users SET avatar=? WHERE id=?").run(rel, authedUser(req).id);
@@ -601,10 +625,12 @@ app.delete("/api/comments/:id", requireAuth, (req, res) => {
   ok(res);
 });
 const countNoteImages = (content: string) => ((content || "").match(/!\[[^\]]*\]\([^)\s]+\)/g) || []).length;
-// 正文中的本地上传图路径（/uploads/images/xxx），用于删除笔记/移除图片时清理孤儿文件
+const VIDEO_EXT = /\.(mp4|webm|mov)$/i;
+const countNoteVideos = (content: string) => ((content || "").match(/!\[[^\]]*\]\([^)\s]+\.(mp4|webm|mov)\)/gi) || []).length;
+// 正文中的本地上传文件路径（/uploads/images/xxx 或 /uploads/videos/xxx），用于删除笔记/移除时清理孤儿文件
 const localImagePathsOf = (content: string): string[] => {
   const out = new Set<string>();
-  const re = /!\[[^\]]*\]\((\/uploads\/images\/[^)\s]+)\)/g;
+  const re = /!\[[^\]]*\]\((\/uploads\/(?:images|videos)\/[^)\s]+)\)/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(content || ""))) out.add(m[1]);
   return [...out];
@@ -632,6 +658,7 @@ app.post("/api/notes", requireAuth, (req, res) => {
   const content = String(req.body?.content || "");
   if (!content.trim() && !title) return fail(res, 400, "标题和正文至少填一项");
   if (countNoteImages(content) > 9) return fail(res, 400, "每篇独白最多插入 9 张图片");
+  if (countNoteVideos(content) > 3) return fail(res, 400, "每篇独白最多插入 3 个视频");
   const tags = Array.isArray(req.body?.tags) ? (req.body.tags as unknown[]).map((t) => String(t).trim().slice(0, 24)).filter(Boolean).slice(0, 10) : [];
   const now = Date.now();
   const info = db.prepare("INSERT INTO notes(user_id,title,content,tags,weather,location,visibility,pinned,archived,allow_comments,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)")
@@ -647,6 +674,7 @@ app.put("/api/notes/:id", requireAuth, (req, res) => {
   if (!n || n.user_id !== u.id) return fail(res, 404, "笔记不存在");
   const newContent = String(req.body?.content ?? n.content);
   if (countNoteImages(newContent) > 9) return fail(res, 400, "每篇独白最多插入 9 张图片");
+  if (countNoteVideos(newContent) > 3) return fail(res, 400, "每篇独白最多插入 3 个视频");
   const tags = Array.isArray(req.body?.tags) ? (req.body.tags as unknown[]).map((t) => String(t).trim().slice(0, 24)).filter(Boolean).slice(0, 10) : JSON.parse(n.tags);
   db.prepare("UPDATE notes SET title=?,content=?,tags=?,weather=?,location=?,visibility=?,pinned=?,archived=?,allow_comments=?,updated_at=? WHERE id=?")
     .run(String(req.body?.title ?? n.title).slice(0, 120), newContent, JSON.stringify(tags),
@@ -849,6 +877,23 @@ app.get("/api/users/by-name/:username", requireAuth, (req, res) => {
   const u = getUserByUsername(String(req.params.username || "").trim());
   if (!u || u.status !== "active") return fail(res, 404, "用户不存在");
   ok(res, { user: { id: u.id, username: u.username, nickname: u.nickname, avatar: u.avatar } });
+});
+
+// ---------- 上传设置 ----------
+app.get("/api/admin/upload", requireAdmin, (_req, res) => {
+  ok(res, {
+    videoEnabled: videoUploadEnabled(),
+    videoMaxMb: Math.max(1, Math.min(100, Number(getSetting("upload_video_max_mb", "10")) || 10)),
+  });
+});
+app.put("/api/admin/upload", requireAdmin, (req, res) => {
+  const b = req.body || {};
+  if (b.videoEnabled !== undefined) setSetting("upload_video_enabled", b.videoEnabled ? "1" : "0");
+  if (b.videoMaxMb !== undefined) {
+    const mb = Math.max(1, Math.min(100, Math.floor(Number(b.videoMaxMb)) || 10));
+    setSetting("upload_video_max_mb", String(mb));
+  }
+  ok(res);
 });
 
 // ---------- 私信 ----------

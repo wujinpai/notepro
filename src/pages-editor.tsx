@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState } from "react";
-import { api, type NoteInfo } from "./api";
+import { api, type NoteInfo, type SiteInfo } from "./api";
 import { PinIcon, TagInput } from "./components";
 import { wmoToZh } from "./weather";
-import { countImages, renderMarkdown } from "./md";
+import { countImages, countVideos, renderMarkdown } from "./md";
 
 const COLOR_PRESETS = ["#e03131", "#e8590c", "#f08c00", "#2f9e44", "#1098ad", "#1971c2", "#7048e8", "#d6336c"];
 
-export function EditorPage({ note, onSaved, onCancel }: {
-  note: NoteInfo | null; onSaved: (n: NoteInfo) => void; onCancel: () => void;
+export function EditorPage({ note, site, onSaved, onCancel }: {
+  note: NoteInfo | null; site: SiteInfo; onSaved: (n: NoteInfo) => void; onCancel: () => void;
 }) {
   const [title, setTitle] = useState(note?.title || "");
   const [content, setContent] = useState(note?.content || "");
@@ -27,17 +27,21 @@ export function EditorPage({ note, onSaved, onCancel }: {
   const [pane, setPane] = useState<"edit" | "preview">("edit");
   const taRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const videoRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     api.get<{ tags: { name: string }[] }>("/api/tags?mine=1").then((d) => setSuggestions(d.tags.map((t) => t.name))).catch(() => undefined);
   }, []);
 
   const insertImage = async (file: File) => {
-    if (countImages(content) >= 9) { setError("每篇独白最多 9 张图片，已达上限"); return; }
+    const isVideo = file.type.startsWith("video/");
+    if (isVideo && !site.videoUpload.enabled) { setError("视频上传已关闭"); return; }
+    if (isVideo && countVideos(content) >= 3) { setError("每篇独白最多 3 个视频，已达上限"); return; }
+    if (!isVideo && countImages(content) >= 9) { setError("每篇独白最多 9 张图片，已达上限"); return; }
     setUploading(true);
     try {
       const r = await api.upload("/api/upload", file);
-      const md = `\n![图片](${r.path})\n`;
+      const md = `\n![${isVideo ? "视频" : "图片"}](${r.path})\n`;
       const ta = taRef.current;
       if (ta) {
         const s = ta.selectionStart;
@@ -282,6 +286,10 @@ export function EditorPage({ note, onSaved, onCancel }: {
                 <button type="button" className="md-tool" title="链接" onClick={insertLink}>链接</button>
                 <button type="button" className="md-tool" title="插入图片（上传）" disabled={uploading}
                   onClick={() => { if (countImages(content) >= 9) { setError("每篇独白最多 9 张图片，已达上限"); return; } fileRef.current?.click(); }}>{uploading ? "上传中…" : "图片"}</button>
+                {site.videoUpload.enabled && (
+                  <button type="button" className="md-tool" title={`插入视频（上传，最大 ${site.videoUpload.maxMb}MB）`} disabled={uploading}
+                    onClick={() => { if (countVideos(content) >= 3) { setError("每篇独白最多 3 个视频，已达上限"); return; } videoRef.current?.click(); }}>{uploading ? "上传中…" : "视频"}</button>
+                )}
                 <button type="button" className="md-tool md-tool-mono" title="行内代码" onClick={() => wrapSel("`", "`", "代码")}>{"<>"}</button>
                 <button type="button" className="md-tool md-tool-mono" title="代码块" onClick={() => wrapSel("```\n", "\n```", "代码")}>{"{ }"}</button>
                 <button type="button" className="md-tool" title="引用" onClick={() => linePrefix("> ")}>引用</button>
@@ -289,6 +297,8 @@ export function EditorPage({ note, onSaved, onCancel }: {
                 <button type="button" className="md-tool" title="有序列表" onClick={() => linePrefix("1. ")}>1. 列表</button>
                 <button type="button" className="md-tool" title="分割线" onClick={() => insertAt("\n\n---\n\n")}>分割线</button>
                 <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/gif,image/webp" hidden
+                  onChange={(e) => { const f = e.target.files?.[0]; if (f) void insertImage(f); e.target.value = ""; }} />
+                <input ref={videoRef} type="file" accept="video/mp4,video/webm,video/quicktime" hidden
                   onChange={(e) => { const f = e.target.files?.[0]; if (f) void insertImage(f); e.target.value = ""; }} />
               </div>
               {colorOpen && (

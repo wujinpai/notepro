@@ -2,11 +2,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api, fmtTime, type NoteInfo, type UserInfo } from "./api";
 import { Avatar } from "./components";
 
-type AdminTab = "overview" | "users" | "notes" | "site" | "smtp" | "oauth" | "weather" | "invite";
+type AdminTab = "overview" | "users" | "notes" | "site" | "smtp" | "oauth" | "weather" | "invite" | "upload";
 
 export function AdminPage({ user, embedded = false }: { user: UserInfo; embedded?: boolean }) {
   const [tab, setTab] = useState<AdminTab>("overview");
-  const tabs: [AdminTab, string][] = [["overview", "概览"], ["users", "用户管理"], ["notes", "内容管理"], ["site", "站点设置"], ["smtp", "邮箱设置"], ["oauth", "第三方登录"], ["weather", "天气与位置"], ["invite", "邀请码"]];
+  const tabs: [AdminTab, string][] = [["overview", "概览"], ["users", "用户管理"], ["notes", "内容管理"], ["site", "站点设置"], ["smtp", "邮箱设置"], ["oauth", "第三方登录"], ["weather", "天气与位置"], ["invite", "邀请码"], ["upload", "上传设置"]];
   const content = (
     <>
       {tab === "overview" && <Overview />}
@@ -17,6 +17,7 @@ export function AdminPage({ user, embedded = false }: { user: UserInfo; embedded
       {tab === "oauth" && <OauthSettings />}
       {tab === "weather" && <GeoWeatherSettings />}
       {tab === "invite" && <InviteCodes />}
+      {tab === "upload" && <UploadSettings />}
     </>
   );
   // 嵌入用户中心：不再套一层 me-layout，只留子标签行 + 内容（外层导航由用户中心承担）
@@ -574,6 +575,34 @@ function InviteCodes() {
             {rows.length === 0 && <tr><td colSpan={4} className="muted">暂无邀请码</td></tr>}
           </tbody>
         </table>
+      </div>
+    </div>
+  );
+}
+
+// ---------- 上传设置 ----------
+function UploadSettings() {
+  const [f, setF] = useState({ videoEnabled: true, videoMaxMb: 10 });
+  const [msg, setMsg] = useState("");
+  useEffect(() => { api.get<typeof f>("/api/admin/upload").then(setF).catch(() => undefined); }, []);
+  const save = async () => {
+    try { await api.put("/api/admin/upload", f); setMsg("上传设置已保存"); }
+    catch (e) { setMsg((e as Error).message); }
+  };
+  return (
+    <div className="panel">
+      <h3>上传设置</h3>
+      <div className="form">
+        <label className="check"><input type="checkbox" checked={f.videoEnabled} onChange={(e) => setF({ ...f, videoEnabled: e.target.checked })} /> 允许上传视频（MP4/WebM/MOV）</label>
+        <label>视频大小限制（MB）
+          <input type="number" min={1} max={100} value={f.videoMaxMb}
+            onChange={(e) => setF({ ...f, videoMaxMb: Math.max(1, Math.min(100, Number(e.target.value) || 10)) })} style={{ width: 100 }} />
+        </label>
+        <p className="muted tiny">图片限制固定为 5MB；每篇独白最多 3 个视频。关闭视频上传后，编辑器不再显示视频按钮，已发布视频不受影响。</p>
+      </div>
+      {msg && <p className="ok-text">{msg}</p>}
+      <div className="btn-row">
+        <button className="btn btn-primary" onClick={() => void save()}>保存设置</button>
       </div>
     </div>
   );

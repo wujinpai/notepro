@@ -638,3 +638,7 @@ th { color: var(--muted); font-weight: 500; font-size: 13px; }
   .dm-list { width: 100%; }
   .dm-back { display: inline-flex; }
 }
+
+/* 正文视频 */
+.video-wrap { margin: 12px 0; }
+.video-wrap video, .note-content video, .markdown video { width: 100%; max-height: 480px; border-radius: 12px; background: #000; display: block; }

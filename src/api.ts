@@ -15,7 +15,8 @@ export interface CommentInfo {
 }
 export interface SiteInfo {
   name: string; subtitle: string; description: string; keywords: string; footer: string;
-  icp: string; logo: string; accent: string; registerOpen: boolean; inviteOnly: boolean; oauthProviders: string[];
+  icp: string; logo: string; accent: string; registerOpen: boolean; inviteOnly: boolean;
+  videoUpload: { enabled: boolean; maxMb: number }; oauthProviders: string[];
 }
 
 // ---------- 主题强调色 ----------

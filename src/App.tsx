@@ -71,7 +71,7 @@ export default function App() {
   const { theme, toggle } = useTheme();
   // 初始站点信息来自服务端注入/本地缓存，未就绪时 name 留空：品牌区只渲染中性占位，不闪默认「己素」与蓝 N
   const [site, setSite] = useState<SiteInfo>(() => {
-    const s = bootSite() ?? { name: "", subtitle: "", description: "", keywords: "", footer: "", icp: "", logo: "", accent: "", registerOpen: true, inviteOnly: false, oauthProviders: [] };
+    const s = bootSite() ?? { name: "", subtitle: "", description: "", keywords: "", footer: "", icp: "", logo: "", accent: "", registerOpen: true, inviteOnly: false, videoUpload: { enabled: true, maxMb: 10 }, oauthProviders: [] };
     if (s.accent) applyAccent(s.accent);
     return s;
   });
@@ -153,7 +153,7 @@ export default function App() {
       if (meta && d.description) meta.setAttribute("content", d.description);
     }).catch(() => {
       // 接口异常时才落默认品牌（正常路径首帧已由注入/缓存给出真值，不会闪）
-      setSite((s) => (s.name ? s : { name: "己素", subtitle: "Jisu", description: "", keywords: "", footer: "", icp: "", logo: "", accent: "", registerOpen: true, inviteOnly: false, oauthProviders: [] }));
+      setSite((s) => (s.name ? s : { name: "己素", subtitle: "Jisu", description: "", keywords: "", footer: "", icp: "", logo: "", accent: "", registerOpen: true, inviteOnly: false, videoUpload: { enabled: true, maxMb: 10 }, oauthProviders: [] }));
     });
     refreshUser();
     // OAuth 回调带回的消息/成功标记
@@ -337,7 +337,7 @@ export default function App() {
         ) : isEdit ? (
           !user ? <div className="empty">请先登录。</div>
             : !editLoaded ? <div className="empty">加载中…</div>
-            : <EditorPage key={editNote?.id || "new"} note={editNote} onCancel={() => go("#")} onSaved={(n) => go(`#note/${n.id}`)} />
+            : <EditorPage key={editNote?.id || "new"} note={editNote} site={site} onCancel={() => go("#")} onSaved={(n) => go(`#note/${n.id}`)} />
         ) : noteId ? (
           <NoteDetail noteId={Number(noteId)} user={user} site={site} onBack={() => go("#")} onEdit={openEdit} onDeleted={() => go("#")}
             focusComments={commentFocus === Number(noteId)} onAuthRequest={() => setAuthOpen(true)}
