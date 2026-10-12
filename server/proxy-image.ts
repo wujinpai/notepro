@@ -7,6 +7,15 @@ export const PROXY_MAX_BYTES = 8 * 1024 * 1024;
 export const PROXY_TIMEOUT_MS = 10_000;
 const MAX_REDIRECTS = 3;
 
+// 浏览器身份请求头：部分图床/ CDN 会拦截无 UA 或非浏览器 UA 的服务端抓取
+//（notes 项目走服务端 Playwright 真实浏览器截图，故不受影响；本代理是直连 fetch，必须带浏览器身份）
+const BROWSER_HEADERS: Record<string, string> = {
+  "User-Agent":
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+  Accept: "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+  "Accept-Language": "zh-CN,zh;q=0.9",
+};
+
 export class ProxyImageError extends Error {
   status: number;
   constructor(status: number, message: string) {
@@ -36,7 +45,13 @@ export function isBlockedIp(ip: string): boolean {
   if (fam === 6) {
     const n = ip.toLowerCase();
     if (n === "::" || n === "::1") return true;
-    if (n.startsWith("::ffff:")) return true; // ::ffff:0:0/96 IPv4 映射 → 全部拦截
+    if (n.startsWith("::ffff:")) {
+      // IPv4 映射的 IPv6：按内嵌的 IPv4 精确判定，而非整段拦截
+      //（双栈环境下 DNS 可能返回映射形式，公网 IP 不应被误杀；127.0.0.1 等仍被 IPv4 规则拦截）
+      const v4 = n.slice("::ffff:".length);
+      if (net.isIP(v4) === 4) return isBlockedIp(v4);
+      return true; // 非标准形式保守拦截
+    }
     const first = parseInt(n.split(":")[0] || "0", 16);
     if (Number.isNaN(first)) return true;
     if (first >= 0xfe80 && first <= 0xfebf) return true; // fe80::/10 链路本地
@@ -92,7 +107,7 @@ export async function fetchProxyImage(
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
     let r: Response;
     try {
-      r = await fetch(current.toString(), { redirect: "manual", signal });
+      r = await fetch(current.toString(), { redirect: "manual", signal, headers: BROWSER_HEADERS });
     } catch (e) {
       if ((e as Error)?.name === "AbortError" || signal.aborted) throw perr(502, "抓取超时");
       throw perr(502, "图片抓取失败");

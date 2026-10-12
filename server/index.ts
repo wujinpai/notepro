@@ -919,7 +919,11 @@ app.get("/api/proxy-image", requireAuth, rateLimit(60, 60_000, "proxyimg"), asyn
       .set("Cache-Control", "public, max-age=86400")
       .end(bytes);
   } catch (e) {
-    if (e instanceof ProxyImageError) return fail(res, e.status === 400 ? 400 : 502, e.message);
+    if (e instanceof ProxyImageError) {
+      console.warn(`[proxy-image] ${e.status} ${raw.slice(0, 160)}: ${e.message}`);
+      return fail(res, e.status === 400 ? 400 : 502, e.message);
+    }
+    console.warn(`[proxy-image] 502 ${raw.slice(0, 160)}: 图片抓取失败`);
     return fail(res, 502, "图片抓取失败");
   } finally {
     clearTimeout(timer);

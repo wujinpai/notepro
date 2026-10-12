@@ -34,9 +34,13 @@ describe("isBlockedIp", () => {
     assert.equal(isBlockedIp("240.0.0.1"), true);
   });
   it("IPv6 特殊地址拦截", () => {
-    for (const ip of ["::1", "::", "::ffff:127.0.0.1", "::ffff:8.8.8.8", "fe80::1", "fc00::1", "fd00::1", "ff02::1"]) {
+    for (const ip of ["::1", "::", "::ffff:127.0.0.1", "::ffff:10.0.0.1", "::ffff:169.254.169.254", "fe80::1", "fc00::1", "fd00::1", "ff02::1"]) {
       assert.equal(isBlockedIp(ip), true, ip);
     }
+  });
+  it("IPv4 映射的公网地址放行（按内嵌 IPv4 精确判定）", () => {
+    assert.equal(isBlockedIp("::ffff:8.8.8.8"), false);
+    assert.equal(isBlockedIp("::ffff:1.1.1.1"), false);
   });
   it("公网 IP 放行", () => {
     for (const ip of ["8.8.8.8", "93.184.216.34", "1.1.1.1", "2001:4860:4860::8888"]) {
@@ -112,6 +116,22 @@ describe("fetchProxyImage（本地 stub 上游）", () => {
     const r = await fetchProxyImage(u("/a.png"), sig);
     assert.deepEqual(r.bytes, PNG);
     assert.equal(r.contentType, "image/png");
+  });
+  it("抓取携带浏览器请求头（防图床拦截程序 UA）", async () => {
+    let ua = "";
+    let accept = "";
+    const s = http.createServer((req, res) => {
+      ua = String(req.headers["user-agent"] || "");
+      accept = String(req.headers["accept"] || "");
+      res.writeHead(200, { "Content-Type": "image/png", "Content-Length": PNG.length });
+      res.end(PNG);
+    });
+    await new Promise<void>((r) => s.listen(0, "127.0.0.1", r));
+    const p = (s.address() as any).port;
+    await fetchProxyImage(new URL(`http://127.0.0.1:${p}/a.png`), sig);
+    s.close();
+    assert.match(ua, /Chrome\/\d+/);
+    assert.match(accept, /image\//);
   });
   it("非图片 content-type 被拒", async () => {
     await assert.rejects(() => fetchProxyImage(u("/t.txt"), sig), (e: any) => e.status === 502);
