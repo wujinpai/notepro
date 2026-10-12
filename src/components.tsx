@@ -522,28 +522,29 @@ export function ShareDialog({ note, brand, onClose }: { note: NoteInfo; brand?: 
         await new Promise((r) => setTimeout(r, 80)); // 等剔除后 DOM 提交
       }
       // 海报图降采样：原图可达数 MB，iOS 上超大 dataURL 会使 toPng 空白/失败。
-      // 抓取前按最长边 1000px 重绘为 PNG dataURL（保留透明通道），既保真又轻量。
-      const jobs: Promise<void>[] = [];
-      node.querySelectorAll("img").forEach((el) => {
+      // 按实际显示尺寸（clientWidth × pixelRatio，上限 1200px）重绘为 PNG dataURL
+      //（保留透明通道），九宫格小图无需大分辨率；逐张处理以降低 iOS 内存峰值。
+      const gridImgs = Array.from(node.querySelectorAll("img"));
+      for (const el of gridImgs) {
+        if (dead) return;
         const img = el as HTMLImageElement;
         const w = img.naturalWidth, h = img.naturalHeight;
-        if (!w || !h) return;
-        const scale = Math.min(1, 1000 / Math.max(w, h));
-        if (scale >= 1) return;
-        jobs.push((async () => {
-          try {
-            const c = document.createElement("canvas");
-            c.width = Math.max(1, Math.round(w * scale));
-            c.height = Math.max(1, Math.round(h * scale));
-            const ctx = c.getContext("2d");
-            if (!ctx) return;
-            ctx.drawImage(img, 0, 0, c.width, c.height);
-            img.src = c.toDataURL("image/png");
-            await img.decode().catch(() => {});
-          } catch { /* 保持原图 */ }
-        })());
-      });
-      await Promise.all(jobs);
+        if (!w || !h) continue;
+        const dispW = img.clientWidth || 0;
+        const target = Math.min(1200, Math.max(300, Math.round(dispW * 2) || 600));
+        const scale = Math.min(1, target / Math.max(w, h));
+        if (scale >= 1) continue;
+        try {
+          const c = document.createElement("canvas");
+          c.width = Math.max(1, Math.round(w * scale));
+          c.height = Math.max(1, Math.round(h * scale));
+          const ctx = c.getContext("2d");
+          if (!ctx) continue;
+          ctx.drawImage(img, 0, 0, c.width, c.height);
+          img.src = c.toDataURL("image/png");
+          await img.decode().catch(() => {});
+        } catch { /* 保持原图 */ }
+      }
     };
     const run = async (): Promise<string | null> => {
       try {
