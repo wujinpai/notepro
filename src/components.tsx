@@ -487,18 +487,23 @@ export function ShareDialog({ note, brand, onClose }: { note: NoteInfo; brand?: 
         if (s && !isSameOriginUrl(s) && !s.startsWith("/api/proxy-image")) img.src = proxyImageUrl(s);
       });
       const imgs = Array.from(node.querySelectorAll("img"));
+      // 等待图片真正可解码：iOS 上图片可能 complete=true 但尚未解码完（naturalWidth=0），
+      // 此时若直接判失败会把好图误杀。用 img.decode() 等待解码完成，30s 超时或解码失败
+      // 再由随后的 complete/naturalWidth 复核。
       await Promise.all(
-        imgs.map(
-          (img) =>
-            new Promise<void>((done) => {
-              const el = img as HTMLImageElement;
-              if (el.complete && el.naturalWidth > 0) return done();
-              if (el.complete) return done(); // complete 但 naturalWidth=0 → 已失败，不必再等
-              const onDone = () => done();
-              el.addEventListener("load", onDone, { once: true });
-              el.addEventListener("error", onDone, { once: true });
-              setTimeout(onDone, 30000);
-            })
+        imgs.map((img) =>
+          (async () => {
+            const el = img as HTMLImageElement;
+            if (el.complete && el.naturalWidth > 0) return;
+            try {
+              await Promise.race([
+                el.decode(),
+                new Promise((_, rej) => setTimeout(() => rej(new Error("decode-timeout")), 30000)),
+              ]);
+            } catch {
+              /* 解码失败或超时：由随后的复核判定 */
+            }
+          })()
         )
       );
       const bad: number[] = [];
@@ -516,6 +521,29 @@ export function ShareDialog({ note, brand, onClose }: { note: NoteInfo; brand?: 
         setAvatarBad(avBad);
         await new Promise((r) => setTimeout(r, 80)); // 等剔除后 DOM 提交
       }
+      // 海报图降采样：原图可达数 MB，iOS 上超大 dataURL 会使 toPng 空白/失败。
+      // 抓取前按最长边 1000px 重绘为 PNG dataURL（保留透明通道），既保真又轻量。
+      const jobs: Promise<void>[] = [];
+      node.querySelectorAll("img").forEach((el) => {
+        const img = el as HTMLImageElement;
+        const w = img.naturalWidth, h = img.naturalHeight;
+        if (!w || !h) return;
+        const scale = Math.min(1, 1000 / Math.max(w, h));
+        if (scale >= 1) return;
+        jobs.push((async () => {
+          try {
+            const c = document.createElement("canvas");
+            c.width = Math.max(1, Math.round(w * scale));
+            c.height = Math.max(1, Math.round(h * scale));
+            const ctx = c.getContext("2d");
+            if (!ctx) return;
+            ctx.drawImage(img, 0, 0, c.width, c.height);
+            img.src = c.toDataURL("image/png");
+            await img.decode().catch(() => {});
+          } catch { /* 保持原图 */ }
+        })());
+      });
+      await Promise.all(jobs);
     };
     const run = async (): Promise<string | null> => {
       try {
