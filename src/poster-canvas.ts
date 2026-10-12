@@ -254,7 +254,9 @@ export async function renderPoster(
   return cv.toDataURL("image/png");
 }
 
-// 加载图片为 ImageBitmap（fetch 字节，不依赖 DOM img 加载行为，微信 WebView 更稳）
+// 加载图片：fetch 取字节（外链已转同源代理），优先用 HTMLImageElement 解码
+//（与 <img> 标签同一解码器，兼容性最好；iOS 上某些 webp 用 createImageBitmap 会失败），
+// Image 失败再试 createImageBitmap。返回 null 表示彻底失败，调用方剔除该图。
 export async function loadBitmap(url: string, timeoutMs = 30000): Promise<ImageBitmap | HTMLImageElement | null> {
   try {
     const ctrl = new AbortController();
@@ -267,27 +269,31 @@ export async function loadBitmap(url: string, timeoutMs = 30000): Promise<ImageB
     } finally {
       clearTimeout(timer);
     }
-    if (typeof createImageBitmap === "function") {
-      try {
-        return await createImageBitmap(blob);
-      } catch {
-        /* 某些浏览器对特定编码（如部分 webp）解码失败，继续走 Image 兜底 */
-      }
-    }
-    // 回退：HTMLImageElement
+    if (!blob.size) throw new Error("empty body");
     const objUrl = URL.createObjectURL(blob);
     try {
-      const img = new Image();
-      img.decoding = "async";
-      await new Promise<void>((res, rej) => {
-        img.onload = () => res();
-        img.onerror = () => rej(new Error("img error"));
-        img.src = objUrl;
-      });
-      return img;
+      // 优先 Image：解码器与页面 <img> 一致
+      try {
+        const img = new Image();
+        img.decoding = "async";
+        await new Promise<void>((res, rej) => {
+          img.onload = () => res();
+          img.onerror = () => rej(new Error("img error"));
+          img.src = objUrl;
+        });
+        if (img.naturalWidth > 0 && img.naturalHeight > 0) return img;
+      } catch {
+        /* 继续尝试 createImageBitmap */
+      }
+      if (typeof createImageBitmap === "function") {
+        const bmp = await createImageBitmap(blob);
+        if (bmp.width > 0 && bmp.height > 0) return bmp;
+        try { bmp.close(); } catch { /* ignore */ }
+      }
     } finally {
       URL.revokeObjectURL(objUrl);
     }
+    return null;
   } catch {
     return null;
   }
