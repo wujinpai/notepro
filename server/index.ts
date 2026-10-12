@@ -844,6 +844,92 @@ app.delete("/api/admin/invite-codes/:code", requireAdmin, (req, res) => {
   ok(res);
 });
 
+// 按用户名查用户（发起私信用，仅返回公开信息）
+app.get("/api/users/by-name/:username", requireAuth, (req, res) => {
+  const u = getUserByUsername(String(req.params.username || "").trim());
+  if (!u || u.status !== "active") return fail(res, 404, "用户不存在");
+  ok(res, { user: { id: u.id, username: u.username, nickname: u.nickname, avatar: u.avatar } });
+});
+
+// ---------- 私信 ----------
+const dmThreadOf = (uid: number, tid: number) => {
+  const t = db.prepare("SELECT * FROM dm_threads WHERE id=?").get(tid) as { id: number; user_a: number; user_b: number; a_last_read: number; b_last_read: number } | undefined;
+  if (!t || (t.user_a !== uid && t.user_b !== uid)) return null;
+  return t;
+};
+const dmOther = (t: { user_a: number; user_b: number }, uid: number) => (t.user_a === uid ? t.user_b : t.user_a);
+// 会话列表：对方信息 + 最后一条 + 未读数
+app.get("/api/dm/threads", requireAuth, (req, res) => {
+  const u = authedUser(req);
+  const threads = db.prepare("SELECT * FROM dm_threads WHERE user_a=? OR user_b=? ORDER BY updated_at DESC LIMIT 100").all(u.id, u.id) as { id: number; user_a: number; user_b: number; a_last_read: number; b_last_read: number; updated_at: number }[];
+  const out = threads.map((t) => {
+    const oid = dmOther(t, u.id);
+    const ou = getUserById(oid);
+    if (!ou || ou.status !== "active") return null;
+    const last = db.prepare("SELECT id, sender_id, content, created_at FROM dm_messages WHERE thread_id=? ORDER BY id DESC LIMIT 1").get(t.id) as { id: number; sender_id: number; content: string; created_at: number } | undefined;
+    const myRead = t.user_a === u.id ? t.a_last_read : t.b_last_read;
+    const unread = (db.prepare("SELECT COUNT(*) c FROM dm_messages WHERE thread_id=? AND sender_id != ? AND created_at > ?").get(t.id, u.id, myRead) as { c: number }).c;
+    return {
+      id: t.id, updated_at: t.updated_at, unread,
+      peer: { id: ou.id, username: ou.username, nickname: ou.nickname, avatar: ou.avatar },
+      last: last ? { content: last.content.slice(0, 80), created_at: last.created_at, mine: last.sender_id === u.id } : null,
+    };
+  }).filter(Boolean);
+  ok(res, { threads: out });
+});
+// 未读总数（顶栏红点）
+app.get("/api/dm/unread", requireAuth, (req, res) => {
+  const u = authedUser(req);
+  const threads = db.prepare("SELECT id, user_a, a_last_read, b_last_read FROM dm_threads WHERE user_a=? OR user_b=?").all(u.id, u.id) as { id: number; user_a: number; a_last_read: number; b_last_read: number }[];
+  let total = 0;
+  for (const t of threads) {
+    const myRead = t.user_a === u.id ? t.a_last_read : t.b_last_read;
+    total += (db.prepare("SELECT COUNT(*) c FROM dm_messages WHERE thread_id=? AND sender_id != ? AND created_at > ?").get(t.id, u.id, myRead) as { c: number }).c;
+  }
+  ok(res, { unread: total });
+});
+// 发起/获取会话
+app.post("/api/dm/threads", requireAuth, rateLimit(30, 60_000, "dm-new"), (req, res) => {
+  const u = authedUser(req);
+  const peerId = Number(req.body?.userId);
+  if (!peerId || peerId === u.id) return fail(res, 400, "不能给自己发私信");
+  const peer = getUserById(peerId);
+  if (!peer || peer.status !== "active") return fail(res, 404, "用户不存在");
+  const a = Math.min(u.id, peerId), b = Math.max(u.id, peerId);
+  let t = db.prepare("SELECT * FROM dm_threads WHERE user_a=? AND user_b=?").get(a, b) as { id: number; updated_at: number } | undefined;
+  if (!t) {
+    const r = db.prepare("INSERT INTO dm_threads(user_a, user_b, updated_at) VALUES(?,?,?)").run(a, b, Date.now());
+    t = { id: Number(r.lastInsertRowid), updated_at: Date.now() };
+  }
+  ok(res, { id: t.id, peer: { id: peer.id, username: peer.username, nickname: peer.nickname, avatar: peer.avatar } });
+});
+// 消息列表（倒序取，标记已读）
+app.get("/api/dm/threads/:id/messages", requireAuth, (req, res) => {
+  const u = authedUser(req);
+  const t = dmThreadOf(u.id, Number(req.params.id));
+  if (!t) return fail(res, 404, "会话不存在");
+  const before = Number(req.query.before) || 0;
+  const msgs = (before > 0
+    ? db.prepare("SELECT id, sender_id, content, created_at FROM dm_messages WHERE thread_id=? AND id < ? ORDER BY id DESC LIMIT 30")
+    : db.prepare("SELECT id, sender_id, content, created_at FROM dm_messages WHERE thread_id=? ORDER BY id DESC LIMIT 30")
+  ).all(...(before > 0 ? [t.id, before] : [t.id])) as { id: number; sender_id: number; content: string; created_at: number }[];
+  // 标记已读
+  const col = t.user_a === u.id ? "a_last_read" : "b_last_read";
+  db.prepare(`UPDATE dm_threads SET ${col}=? WHERE id=?`).run(Date.now(), t.id);
+  ok(res, { messages: msgs.reverse().map((m) => ({ ...m, mine: m.sender_id === u.id })) });
+});
+// 发送
+app.post("/api/dm/threads/:id/messages", requireAuth, rateLimit(60, 60_000, "dm-send"), (req, res) => {
+  const u = authedUser(req);
+  const t = dmThreadOf(u.id, Number(req.params.id));
+  if (!t) return fail(res, 404, "会话不存在");
+  const content = String(req.body?.content || "").trim().slice(0, 2000);
+  if (!content) return fail(res, 400, "消息不能为空");
+  const r = db.prepare("INSERT INTO dm_messages(thread_id, sender_id, content, created_at) VALUES(?,?,?,?)").run(t.id, u.id, content, Date.now());
+  db.prepare("UPDATE dm_threads SET updated_at=? WHERE id=?").run(Date.now(), t.id);
+  ok(res, { id: Number(r.lastInsertRowid) });
+});
+
 app.get("/api/admin/smtp", requireAdmin, (_req, res) => {
   ok(res, {
     host: getSetting("smtp_host"), port: Number(getSetting("smtp_port", "465")), secure: getSetting("smtp_secure", "1") === "1",

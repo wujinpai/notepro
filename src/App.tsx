@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, bootSite, cacheSite, syncFavicon, applyAccent, DEFAULT_ICON, type NoteInfo, type SiteInfo, type UserInfo } from "./api";
-import { AuthDialog, Avatar, GithubIcon, MoonIcon, PenIcon, SearchIcon, SunIcon } from "./components";
+import { AuthDialog, Avatar, ChatIcon, GithubIcon, MoonIcon, PenIcon, SearchIcon, SunIcon } from "./components";
 import { HomePage, NoteDetail, SiteDrawer } from "./pages-home";
 import { SharePage } from "./pages-share";
 import { EditorPage } from "./pages-editor";
 import { MePage } from "./pages-me";
+import { DmPage } from "./pages-dm";
 
 function useTheme() {
   const [theme, setTheme] = useState<"light" | "dark">(() => {
@@ -78,6 +79,7 @@ export default function App() {
   const [authOpen, setAuthOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const [dmUnread, setDmUnread] = useState(0);
   const [route, setRoute] = useState(location.hash);
   const [editNote, setEditNote] = useState<NoteInfo | null>(null);
   const [editLoaded, setEditLoaded] = useState(false);
@@ -120,6 +122,20 @@ export default function App() {
     api.get<{ days: Record<string, number> }>(`/api/calendar?month=${calMonth}`).then((d) => setCalDays(d.days)).catch(() => setCalDays({}));
   }, [calMonth]);
   useEffect(() => { loadNav(); }, [loadNav, user]);
+  // 私信未读数轮询（登录后）：顶栏红点
+  useEffect(() => {
+    if (!user) { setDmUnread(0); return; }
+    let dead = false;
+    const poll = async () => {
+      try {
+        const d = await api.get<{ unread: number }>("/api/dm/unread");
+        if (!dead) setDmUnread(d.unread);
+      } catch { /* ignore */ }
+    };
+    void poll();
+    const timer = setInterval(poll, 30000);
+    return () => { dead = true; clearInterval(timer); };
+  }, [user]);
   const drawerWasOpen = useRef(false);
   useEffect(() => {
     if (drawerOpen && !drawerWasOpen.current) loadNav();
@@ -221,7 +237,8 @@ export default function App() {
   const isEdit = route === "#edit" || /^#edit\/\d+$/.test(route);
   const isMe = route.startsWith("#me");
   const isAdmin = route.startsWith("#admin");
-  const isHome = !noteId && !isEdit && !isMe && !isAdmin;
+  const isDm = route === "#dm" || route.startsWith("#dm/");
+  const isHome = !noteId && !isEdit && !isMe && !isAdmin && !isDm;
 
   // 信息流「评论」：已登录直达详情评论区；游客先弹登录框，登录后自动续跳
   const openComment = (n: NoteInfo) => {
@@ -271,6 +288,10 @@ export default function App() {
           <button className="icon-btn theme-btn" onClick={toggle} title={theme === "dark" ? "切换到白天" : "切换到夜晚"} aria-label="切换主题">{theme === "dark" ? <SunIcon /> : <MoonIcon />}</button>
           {user ? (
             <>
+              <button className="icon-btn dm-btn" onClick={() => go("#dm")} aria-label="私信" title="私信">
+                <ChatIcon />
+                {dmUnread > 0 && <span className="dm-dot">{dmUnread > 99 ? "99+" : dmUnread}</span>}
+              </button>
               <button className="icon-btn pen-btn" onClick={() => openEdit(null)} aria-label="写独白" title="写独白"><PenIcon /></button>
               <button className="btn btn-primary compose-btn" onClick={() => openEdit(null)}>独白</button>
               <div className="user-menu-wrap" ref={menuRef}>
@@ -309,6 +330,8 @@ export default function App() {
         {/* 管理后台已并入用户中心，#admin 深链直接落到用户中心的「管理后台」标签，不留死链 */}
         {isAdmin ? (
           user ? <MePage user={user} site={site} refreshUser={refreshUser} onEditNote={openEdit} onOpenNote={openNote} /> : <div className="empty">请先登录。<button className="text-btn" onClick={() => setAuthOpen(true)}>去登录</button></div>
+        ) : isDm ? (
+          user ? <DmPage user={user} onUnreadChange={setDmUnread} /> : <div className="empty">请先登录。<button className="text-btn" onClick={() => setAuthOpen(true)}>去登录</button></div>
         ) : isMe ? (
           user ? <MePage user={user} site={site} refreshUser={refreshUser} onEditNote={openEdit} onOpenNote={openNote} /> : <div className="empty">请先登录。<button className="text-btn" onClick={() => setAuthOpen(true)}>去登录</button></div>
         ) : isEdit ? (

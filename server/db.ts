@@ -97,6 +97,23 @@ CREATE TABLE IF NOT EXISTS invite_codes (
   used_at INTEGER,
   used_by INTEGER
 );
+CREATE TABLE IF NOT EXISTS dm_threads (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_a INTEGER NOT NULL,
+  user_b INTEGER NOT NULL,
+  a_last_read INTEGER NOT NULL DEFAULT 0,
+  b_last_read INTEGER NOT NULL DEFAULT 0,
+  updated_at INTEGER NOT NULL,
+  UNIQUE(user_a, user_b)
+);
+CREATE TABLE IF NOT EXISTS dm_messages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  thread_id INTEGER NOT NULL,
+  sender_id INTEGER NOT NULL,
+  content TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_dm_messages_thread ON dm_messages(thread_id, id);
 CREATE TABLE IF NOT EXISTS visits (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   ip TEXT NOT NULL DEFAULT '',
