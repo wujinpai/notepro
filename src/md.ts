@@ -140,6 +140,7 @@ export function excerpt(content: string, n = 220): string {
     .replace(/\[color=#[0-9a-fA-F]{6}\]/gi, "")
     .replace(/\[\/color\]/gi, "")
     .replace(/!\[[^\]]*\]\([^)]*\)/g, " ")
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
     .replace(/[#>*`\-]/g, "")
     .replace(/\s+/g, " ")
     .trim();
