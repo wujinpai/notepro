@@ -229,74 +229,83 @@ export function Modal({ title, onClose, children, wide }: { title: string; onClo
 
 // ---------- 滑块拼图验证 ----------
 // SW/SH：挑战生成坐标系（服务端口径）；SHD：前端展示高度（压扁），拼图块等比压扁以贴合背景凹槽
-const SW = 320, SH = 160, SHD = 120, SP = 44;
+// (点字验证尺寸见服务端 WORD_W/WORD_H)
+// 点字验证：点击图片中指定的汉字（按顺序）
 export function SliderCaptcha({ onTicket, resetKey }: { onTicket: (t: string) => void; resetKey: number }) {
-  const [ch, setCh] = useState<{ id: string; bg: string; piece: string; y: number } | null>(null);
-  const [x, setX] = useState(0);
+  const [ch, setCh] = useState<{ id: string; svg: string; targets: string[] } | null>(null);
+  const [clicks, setClicks] = useState<{ x: number; y: number }[]>([]);
   const [state, setState] = useState<"idle" | "ok" | "err">("idle");
   const [msg, setMsg] = useState("");
-  const wrapRef = useRef<HTMLDivElement>(null);
-  const drag = useRef<{ startX: number; base: number } | null>(null);
+  const imgRef = useRef<HTMLImageElement>(null);
 
   const load = useCallback(async () => {
-    setX(0); setState("idle"); setMsg("");
+    setClicks([]); setState("idle"); setMsg("");
     try {
-      const d = await api.get<{ id: string; bg: string; piece: string; y: number }>("/api/auth/slider");
+      const d = await api.get<{ id: string; svg: string; targets: string[] }>("/api/auth/word");
       setCh(d);
     } catch { setMsg("验证图加载失败，请刷新"); }
   }, []);
   useEffect(() => { void load(); }, [load, resetKey]);
 
-  const dispW = () => wrapRef.current?.clientWidth || SW;
-  const scale = () => dispW() / SW;
-  const maxX = () => dispW() - SP * scale();
+  const uri = (svg: string) => `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 
-  const submit = async (dispX: number) => {
+  const onImgClick = (e: React.MouseEvent) => {
+    if (state === "ok" || !ch) return;
+    const img = imgRef.current;
+    if (!img) return;
+    const r = img.getBoundingClientRect();
+    // 转为 SVG viewBox 坐标（300x140）
+    const sx = ((e.clientX - r.left) / r.width) * 300;
+    const sy = ((e.clientY - r.top) / r.height) * 140;
+    const next = [...clicks, { x: Math.round(sx), y: Math.round(sy) }];
+    setClicks(next);
+    // 点够目标字数后自动提交
+    if (next.length >= ch.targets.length) {
+      void submit(next);
+    }
+  };
+
+  const submit = async (pts: { x: number; y: number }[]) => {
     if (!ch) return;
     try {
-      const d = await api.post<{ ticket: string }>("/api/auth/slider/verify", { challengeId: ch.id, x: Math.round(dispX / scale()) });
+      const d = await api.post<{ ticket: string }>("/api/auth/word/verify", { challengeId: ch.id, points: pts });
       setState("ok"); setMsg("验证通过");
       onTicket(d.ticket);
     } catch (e) {
       setState("err"); setMsg((e as Error).message);
-      setTimeout(() => void load(), 700);
+      setTimeout(() => void load(), 900);
     }
   };
 
-  const onPointerDown = (e: React.PointerEvent) => {
+  const undo = () => {
     if (state === "ok") return;
-    (e.target as HTMLElement).setPointerCapture(e.pointerId);
-    drag.current = { startX: e.clientX, base: x };
-  };
-  const onPointerMove = (e: React.PointerEvent) => {
-    if (!drag.current) return;
-    const nx = Math.min(maxX(), Math.max(0, drag.current.base + (e.clientX - drag.current.startX)));
-    setX(nx);
-  };
-  const onPointerUp = () => {
-    if (!drag.current) return;
-    drag.current = null;
-    if (x > 4) void submit(x);
+    setClicks(clicks.slice(0, -1));
   };
 
-  const uri = (svg: string) => `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
   return (
-    <div className="slider-wrap" ref={wrapRef}>
-      <div className="slider-stage" style={{ aspectRatio: `${SW}/${SHD}` }}>
-        {ch && <img className="slider-bg" src={uri(ch.bg)} alt="滑块背景" draggable={false} />}
-        {ch && <img className="slider-piece" src={uri(ch.piece)} alt="滑块" draggable={false}
-          style={{ left: x, width: SP * scale(), height: SP * scale() * (SHD / SH), top: `${((ch?.y ?? 46) / SH) * 100}%` }} />}
+    <div className="word-wrap">
+      <div className="word-hint">
+        请依次点击图中的 <strong className="word-targets">{ch?.targets.join("、")}</strong>
+      </div>
+      <div className="word-stage" style={{ position: "relative", aspectRatio: "300/140" }}>
+        {ch && <img ref={imgRef} className="word-bg" src={uri(ch.svg)} alt="点字验证图" draggable={false}
+          onClick={onImgClick} style={{ width: "100%", display: "block", cursor: "crosshair" }} />}
+        {clicks.map((p, i) => (
+          <span key={i} className="word-mark"
+            style={{ left: `${(p.x / 300) * 100}%`, top: `${(p.y / 140) * 100}%` }}>{i + 1}</span>
+        ))}
         {state === "ok" && <div className="slider-ok">✓ 验证通过</div>}
       </div>
-      <div className="slider-track"
-        onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp}>
-        <div className="slider-fill" style={{ width: x + SP * scale() / 2 }} />
-        <div className="slider-handle" style={{ left: x }} title="拖动滑块">⇄</div>
-        <span className="slider-hint">{state === "ok" ? "已验证" : "拖动滑块完成拼图"}</span>
-      </div>
       <div className="slider-foot">
-        <span className={state === "err" ? "err-text" : "muted tiny"}>{msg}</span>
-        <button type="button" className="text-btn" onClick={() => void load()}>刷新验证图</button>
+        <span className={state === "err" ? "err-text" : "muted tiny"}>
+          {msg || (clicks.length > 0 ? `已点 ${clicks.length}/${ch?.targets.length || 0}，点错可撤销` : " ")}
+        </span>
+        <span>
+          {clicks.length > 0 && state !== "ok" && (
+            <button type="button" className="text-btn" onClick={undo} style={{ marginRight: 8 }}>撤销</button>
+          )}
+          <button type="button" className="text-btn" onClick={() => void load()}>换一张</button>
+        </span>
       </div>
     </div>
   );

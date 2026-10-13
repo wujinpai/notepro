@@ -160,4 +160,74 @@ export function consumeTicket(token: string | undefined): boolean {
   return true;
 }
 
+// ---------- 点字验证（替代滑块）：点击图片中指定的汉字 ----------
+export const WORD_W = 300;
+export const WORD_H = 140;
+const WORD_CHARS = ["人","大","小","中","上","下","左","右","天","地","日","月","水","火","木","金","土","好","学","乐","爱","心","手","目","耳","口","山","石","田","力"];
+const WORD_COUNT = 6;      // 图中总字数
+const WORD_TARGET = 3;     // 需按序点击的字数
+const WORD_TOL = 26;       // 点击容差（像素）
+
+export function createWordChallenge(): { id: string; svg: string; targets: string[] } {
+  const id = randomToken(12);
+  // 随机选 6 个不重复的字
+  const pool = [...WORD_CHARS].sort(() => Math.random() - 0.5);
+  const chars = pool.slice(0, WORD_COUNT);
+  // 随机选 3 个作为目标（按在 chars 中的随机顺序）
+  const idxs = [...Array(WORD_COUNT).keys()].sort(() => Math.random() - 0.5).slice(0, WORD_TARGET);
+  const targets = idxs.map(i => chars[i]);
+  // 随机位置（避免重叠）：6 个字分两行，每行 3 个，x 在列内随机，y 在行内随机
+  const placed: { ch: string; x: number; y: number }[] = [];
+  const cols = 3, rows = 2;
+  const cw = WORD_W / cols, rh = WORD_H / rows;
+  let k = 0;
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const x = Math.floor(c * cw + 18 + Math.random() * (cw - 52));
+      const y = Math.floor(r * rh + 34 + Math.random() * (rh - 58));
+      placed.push({ ch: chars[k++], x, y });
+    }
+  }
+  // 背景点缀
+  let deco = "";
+  const rnd = Math.random;
+  for (let i = 0; i < 8; i++) {
+    deco += `<circle cx="${Math.floor(rnd() * WORD_W)}" cy="${Math.floor(rnd() * WORD_H)}" r="${3 + Math.floor(rnd() * 8)}" fill="#dbe7f5" opacity="0.7"/>`;
+  }
+  const texts = placed.map(p =>
+    `<text x="${p.x}" y="${p.y}" font-size="30" fill="#1a1a1a" font-family="sans-serif" text-anchor="middle" dominant-baseline="middle">${p.ch}</text>`
+  ).join("");
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${WORD_W}" height="${WORD_H}" viewBox="0 0 ${WORD_W} ${WORD_H}"><rect width="${WORD_W}" height="${WORD_H}" fill="#f2f6fc"/>${deco}${texts}</svg>`;
+  db.prepare("INSERT INTO word_challenges(id,chars_json,targets_json,expires_at) VALUES(?,?,?,?)")
+    .run(id, JSON.stringify(placed), JSON.stringify(targets), Date.now() + 5 * 60_000);
+  return { id, svg, targets };
+}
+
+export function verifyWord(challengeId: string, points: { x: number; y: number }[]): { ok: boolean; ticket?: string; error?: string } {
+  const row = db.prepare("SELECT chars_json, targets_json, expires_at, used FROM word_challenges WHERE id=?").get(challengeId) as
+    { chars_json: string; targets_json: string; expires_at: number; used: number } | undefined;
+  if (!row || row.used || row.expires_at < Date.now()) return { ok: false, error: "验证已过期，请刷新" };
+  db.prepare("UPDATE word_challenges SET used=1 WHERE id=?").run(challengeId);
+  let placed: { ch: string; x: number; y: number }[];
+  let targets: string[];
+  try {
+    placed = JSON.parse(row.chars_json);
+    targets = JSON.parse(row.targets_json);
+  } catch {
+    return { ok: false, error: "验证数据异常，请刷新" };
+  }
+  if (!Array.isArray(points) || points.length !== targets.length) return { ok: false, error: "请按顺序点击全部指定文字" };
+  for (let i = 0; i < targets.length; i++) {
+    const t = targets[i];
+    const pos = placed.find(p => p.ch === t);
+    const pt = points[i];
+    if (!pos || typeof pt?.x !== "number" || typeof pt?.y !== "number") return { ok: false, error: "点击顺序不正确，请重试" };
+    const dx = pt.x - pos.x, dy = pt.y - pos.y;
+    if (dx * dx + dy * dy > WORD_TOL * WORD_TOL) return { ok: false, error: "点击位置不正确，请重试" };
+  }
+  const ticket = randomToken(24);
+  db.prepare("INSERT INTO tickets(token,expires_at) VALUES(?,?)").run(ticket, Date.now() + 5 * 60_000);
+  return { ok: true, ticket };
+}
+
 export { setSetting, encryptSecret };

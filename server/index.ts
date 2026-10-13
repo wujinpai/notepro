@@ -6,7 +6,7 @@ import { join, extname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { db, getSetting, setSetting, DATA_DIR, DB_PATH } from "./db.js";
 import { hashPassword, verifyPassword, sha256, encryptSecret, decryptSecret, verifyPayload, signPayload, maskEmail, randomToken, parseTencentAddressComponent, normalizeQweatherHost } from "./util.js";
-import { sendEmailCode, verifyEmailCode, createSliderChallenge, verifySlider, consumeTicket, getSmtpConfig, sendMail } from "./mail.js";
+import { sendEmailCode, verifyEmailCode, createWordChallenge, verifyWord, consumeTicket, getSmtpConfig, sendMail } from "./mail.js";
 import {
   getUserById, getUserByUsername, getUserByEmail, publicUser, createSession, setSessionCookie, clearSessionCookie,
   getSessionUser, destroySession, destroyOtherSessions, destroyAllSessions, requireAuth, requireAdmin, authedUser, rateLimit, parseCookies,
@@ -74,17 +74,17 @@ const DEFAULT_ICON = "/favicon-32.png?v=2";
 const effectiveIcon = (): string => getSetting("site_logo", "") || DEFAULT_ICON;
 
 // ---------- 滑块 ----------
-app.get("/api/auth/slider", rateLimit(60, 60_000, "slider"), (_req, res) => {
-  ok(res, createSliderChallenge());
+app.get("/api/auth/word", rateLimit(60, 60_000, "word"), (_req, res) => {
+  ok(res, createWordChallenge());
 });
-app.post("/api/auth/slider/verify", (req, res) => {
-  const { challengeId, x } = req.body || {};
-  const r = verifySlider(String(challengeId || ""), Number(x));
+app.post("/api/auth/word/verify", (req, res) => {
+  const { challengeId, points } = req.body || {};
+  const r = verifyWord(String(challengeId || ""), Array.isArray(points) ? points : []);
   if (!r.ok) return fail(res, 400, r.error || "验证失败");
   ok(res, { ticket: r.ticket });
 });
 function needTicket(req: Request, res: Response): boolean {
-  if (!consumeTicket(String(req.body?.ticket || ""))) { fail(res, 400, "滑块验证无效或已过期，请重新验证"); return false; }
+  if (!consumeTicket(String(req.body?.ticket || ""))) { fail(res, 400, "验证无效或已过期，请重新验证"); return false; }
   return true;
 }
 

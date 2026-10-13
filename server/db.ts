@@ -49,6 +49,13 @@ CREATE TABLE IF NOT EXISTS slider_challenges (
   expires_at INTEGER NOT NULL,
   used INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS word_challenges (
+  id TEXT PRIMARY KEY,
+  chars_json TEXT NOT NULL,
+  targets_json TEXT NOT NULL,
+  expires_at INTEGER NOT NULL,
+  used INTEGER NOT NULL DEFAULT 0
+);
 CREATE TABLE IF NOT EXISTS tickets (
   token TEXT PRIMARY KEY,
   expires_at INTEGER NOT NULL,
