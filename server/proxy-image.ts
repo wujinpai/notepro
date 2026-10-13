@@ -7,6 +7,9 @@ export const PROXY_MAX_BYTES = 8 * 1024 * 1024;
 // 图床可能很慢（实测 cnb.jisu.cn 约 130KB/s，2MB 图需 ~16s），超时太短会把好图当失败剔除
 export const PROXY_TIMEOUT_MS = 30_000;
 const MAX_REDIRECTS = 3;
+// 信任域名白名单：用户自有基础设施（云盘 share.jisu.cn），
+// 即使在内网 DNS 解析到私有 IP 也允许代理（SSRF 防护对白名单域名放行）。
+const TRUSTED_PROXY_HOSTS = new Set(["share.jisu.cn"]);
 
 // 浏览器身份请求头：部分图床/ CDN 会拦截无 UA 或非浏览器 UA 的服务端抓取
 //（notes 项目走服务端 Playwright 真实浏览器截图，故不受影响；本代理是直连 fetch，必须带浏览器身份）
@@ -92,6 +95,8 @@ export async function assertProxyTarget(raw: string, resolve: DnsLookupFn = dnsL
     throw perr(502, "域名解析失败");
   }
   if (!addrs || addrs.length === 0) throw perr(502, "域名解析失败");
+  // 白名单域名（用户自有基础设施）跳过私网 IP 拦截
+  if (TRUSTED_PROXY_HOSTS.has(host.toLowerCase())) return u;
   for (const a of addrs) {
     if (isBlockedIp(a.address)) throw perr(400, "目标地址被拦截");
   }
