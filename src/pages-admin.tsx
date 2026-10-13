@@ -2,11 +2,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api, fmtTime, type NoteInfo, type UserInfo } from "./api";
 import { Avatar } from "./components";
 
-type AdminTab = "overview" | "users" | "notes" | "site" | "smtp" | "oauth" | "weather" | "invite" | "upload";
+type AdminTab = "overview" | "users" | "notes" | "site" | "smtp" | "oauth" | "sso" | "weather" | "invite" | "upload";
 
 export function AdminPage({ user, embedded = false }: { user: UserInfo; embedded?: boolean }) {
   const [tab, setTab] = useState<AdminTab>("overview");
-  const tabs: [AdminTab, string][] = [["overview", "概览"], ["users", "用户管理"], ["notes", "内容管理"], ["site", "站点设置"], ["smtp", "邮箱设置"], ["oauth", "第三方登录"], ["weather", "天气与位置"], ["invite", "邀请码"], ["upload", "上传设置"]];
+  const tabs: [AdminTab, string][] = [["overview", "概览"], ["users", "用户管理"], ["notes", "内容管理"], ["site", "站点设置"], ["smtp", "邮箱设置"], ["oauth", "第三方登录"], ["sso", "统一登录"], ["weather", "天气与位置"], ["invite", "邀请码"], ["upload", "上传设置"]];
   const content = (
     <>
       {tab === "overview" && <Overview />}
@@ -15,6 +15,7 @@ export function AdminPage({ user, embedded = false }: { user: UserInfo; embedded
       {tab === "site" && <SiteSettings />}
       {tab === "smtp" && <SmtpSettings />}
       {tab === "oauth" && <OauthSettings />}
+      {tab === "sso" && <SsoSettings />}
       {tab === "weather" && <GeoWeatherSettings />}
       {tab === "invite" && <InviteCodes />}
       {tab === "upload" && <UploadSettings />}
@@ -502,6 +503,47 @@ function OauthSettings() {
         );
       })}
       {msg && <p className="ok-text">{msg}</p>}
+    </div>
+  );
+}
+
+// ---------- 统一登录 SSO（作为提供方，供云盘等自有应用跳转登录） ----------
+function SsoSettings() {
+  const [f, setF] = useState({ enabled: false, hasSecret: false, redirectUris: "" });
+  const [secret, setSecret] = useState("");
+  const [msg, setMsg] = useState("");
+  const load = useCallback(() => {
+    api.get<{ enabled: boolean; hasSecret: boolean; redirectUris: string }>("/api/admin/sso")
+      .then((d) => setF({ enabled: d.enabled, hasSecret: d.hasSecret, redirectUris: d.redirectUris }))
+      .catch(() => undefined);
+  }, []);
+  useEffect(() => { load(); }, [load]);
+  const save = async () => {
+    try {
+      await api.put("/api/admin/sso", { enabled: f.enabled, secret: secret || undefined, redirectUris: f.redirectUris });
+      setSecret(""); setMsg("已保存"); load();
+    } catch (e) { setMsg((e as Error).message); }
+  };
+  return (
+    <div className="stack">
+      <div className="panel">
+        <h3>统一登录（SSO 提供方）</h3>
+        <p className="muted tiny" style={{ lineHeight: 1.9 }}>
+          开启后，自有应用（如云盘）可跳转到本站登录，登录成功后带着一次性授权码跳回应用。
+          密钥由本站与应用双方各存一份（本站加密存储），回调地址白名单防授权码外泄。
+        </p>
+        <div className="form">
+          <label className="check"><input type="checkbox" checked={f.enabled} onChange={(e) => setF({ ...f, enabled: e.target.checked })} /> 启用 SSO 提供方</label>
+          <label>共享密钥<input type="password" value={secret} placeholder={f.hasSecret ? "已设置（留空不改）" : "与云盘端填入同一串密钥"} onChange={(e) => setSecret(e.target.value.trim())} /></label>
+          <label>回调地址白名单（每行一个，需精确到路径）
+            <textarea rows={3} value={f.redirectUris} placeholder={"https://drive.jisu.cn/api/auth/callback"} onChange={(e) => setF({ ...f, redirectUris: e.target.value })} />
+          </label>
+        </div>
+        <div className="btn-row">
+          <button className="btn btn-primary" onClick={() => void save()}>保存 SSO 设置</button>
+        </div>
+        {msg && <p className="ok-text">{msg}</p>}
+      </div>
     </div>
   );
 }

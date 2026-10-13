@@ -267,6 +267,38 @@ export default function App() {
     }
   };
 
+  // SSO 统一登录：云盘等自有应用跳过来 ?sso=1&redirect_uri=...&state=...
+  // 已登录则直接发码跳回；未登录先弹登录框，登录成功后自动续跳
+  const [ssoReq, setSsoReq] = useState<{ redirectUri: string; state: string } | null>(() => {
+    try {
+      const p = new URLSearchParams(location.search);
+      return p.get("sso") === "1" && p.get("redirect_uri")
+        ? { redirectUri: p.get("redirect_uri")!, state: p.get("state") || "" }
+        : null;
+    } catch { return null; }
+  });
+  useEffect(() => {
+    if (!ssoReq || !user) return;
+    let dead = false;
+    (async () => {
+      try {
+        const d = await api.post<{ code: string }>("/api/sso/issue", { redirect_uri: ssoReq.redirectUri });
+        if (dead) return;
+        const sep = ssoReq.redirectUri.includes("?") ? "&" : "?";
+        location.href = `${ssoReq.redirectUri}${sep}code=${encodeURIComponent(d.code)}&state=${encodeURIComponent(ssoReq.state)}`;
+      } catch (e) {
+        if (dead) return;
+        alert("SSO 授权失败：" + (e as Error).message);
+        history.replaceState(null, "", location.pathname + location.hash);
+        setSsoReq(null);
+      }
+    })();
+    return () => { dead = true; };
+  }, [ssoReq, user]);
+  useEffect(() => {
+    if (ssoReq && !user) setAuthOpen(true);
+  }, [ssoReq, user]);
+
   // 独立分享页是真实路径 /s/<token>，不走哈希路由与应用顶栏
   const shareMatch = location.pathname.match(/^\/s\/([A-Za-z0-9_-]{8,})$/);
   if (shareMatch) return <SharePage token={shareMatch[1]} />;

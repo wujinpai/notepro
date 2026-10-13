@@ -15,6 +15,7 @@ import type { UserRow } from "./auth.js";
 import { PROVIDERS, getProviderConfig, saveProviderConfig, authorizeUrl, exchangeProfile } from "./oauth.js";
 import type { Provider } from "./oauth.js";
 import { assertProxyTarget, fetchProxyImage, ProxyImageError, PROXY_TIMEOUT_MS } from "./proxy-image.js";
+import { getSsoConfig, saveSsoConfig, isRedirectAllowed, issueSsoCode, verifySsoCode } from "./sso.js";
 
 const app = express();
 const PORT = Number(process.env.PORT || 3001);
@@ -1217,6 +1218,32 @@ app.post("/api/admin/oauth/test", requireAdmin, (req, res) => {
   const cfg = getProviderConfig(p);
   if (!cfg.clientId || !cfg.hasSecret) return fail(res, 400, `${p === "github" ? "GitHub" : "QQ"} 配置不完整：请填写 Client ID/App ID 与密钥后保存`);
   ok(res, { callback: callbackUri(req, p), message: "配置项完整，回调地址可正常构造" });
+});
+
+// ---------- SSO（作为统一登录提供方，供云盘等自有应用跳转登录） ----------
+// 发一次性登录码：已登录用户调用，redirect_uri 必须在管理后台白名单内
+app.post("/api/sso/issue", requireAuth, rateLimit(30, 60_000, "sso-issue"), (req, res) => {
+  const redirectUri = String(req.body?.redirect_uri || "");
+  if (!isRedirectAllowed(redirectUri)) return fail(res, 400, "SSO 未启用或回调地址不在白名单内");
+  const code = issueSsoCode(authedUser(req).id);
+  ok(res, { code });
+});
+// 验码换身份：云盘服务端用共享密钥调用，一次性，10 分钟有效
+app.post("/api/sso/verify", rateLimit(30, 60_000, "sso-verify"), (req, res) => {
+  const userId = verifySsoCode(String(req.body?.code || ""), String(req.body?.secret || ""));
+  if (!userId) return fail(res, 401, "授权码无效或已过期");
+  const u = getUserById(userId);
+  if (!u || u.status !== "active") return fail(res, 403, "账号不可用");
+  ok(res, { user: { id: u.id, username: u.username, nickname: u.nickname || u.username, role: u.role } });
+});
+app.get("/api/admin/sso", requireAdmin, (_req, res) => {
+  const cfg = getSsoConfig();
+  ok(res, { enabled: getSetting("sso_enabled") === "1", hasSecret: cfg.hasSecret, redirectUris: cfg.redirectUris.join("\n") });
+});
+app.put("/api/admin/sso", requireAdmin, (req, res) => {
+  const b = req.body || {};
+  saveSsoConfig(b.enabled === true, b.secret ? String(b.secret) : undefined, String(b.redirectUris || ""));
+  ok(res);
 });
 
 app.get("/api/health", (_req, res) => ok(res, { time: Date.now() }));
