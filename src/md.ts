@@ -140,7 +140,10 @@ export function excerpt(content: string, n = 220): string {
     .replace(/\[color=#[0-9a-fA-F]{6}\]/gi, "")
     .replace(/\[\/color\]/gi, "")
     .replace(/!\[[^\]]*\]\([^)]*\)/g, " ")
-    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_m, t, u) => {
+      const url = /^(https?:\/\/|\/uploads\/)/i.test(u) ? u : "";
+      return url ? `<a href="${url}" target="_blank" rel="noopener noreferrer">${t}</a>` : t;
+    })
     .replace(/[#>*`\-]/g, "")
     .replace(/\s+/g, " ")
     .trim();
