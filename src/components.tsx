@@ -717,8 +717,10 @@ export function NoteCard({ note, onOpen, onComment, onTag }: {
   const [expanded, setExpanded] = useState(false);
   const pickTag = (e: { stopPropagation(): void }, t: string) => { e.stopPropagation(); onTag?.(t); };
   const bodyHtml = renderMarkdownTextOnly(note.content);
-  // 内容较长时折叠：纯文本超 300 字或超 5 行则折叠，点击展开
-  const longBody = bodyHtml && ((note.content || "").length > 300 || (note.content || "").split(/\n/).length > 5);
+  // 内容较长时折叠：去掉 Markdown 标记后的纯文本超 600 字或超 10 行才折叠
+  const plainLen = (note.content || "").replace(/\[([^\]]+)\]\([^)]*\)/g, "$1").replace(/!\[[^\]]*\]\([^)]*\)/g, "").length;
+  const lineCount = (note.content || "").split(/\n/).length;
+  const longBody = bodyHtml && (plainLen > 600 || lineCount > 10);
   return (
     <>
     <article className="note-card">
