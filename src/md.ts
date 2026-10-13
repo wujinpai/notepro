@@ -1,9 +1,15 @@
 // 安全 Markdown 渲染：先转义全部 HTML，再按语法生成标签；链接/图片仅允许 http(s) 与站内 /uploads/
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 const safeUrl = (u: string) => (/^(https?:\/\/|\/uploads\/)/i.test(u) ? u : "");
+// 云盘分享链接转图片直链：share.jisu.cn/s/<token> → share.jisu.cn/api/s/<token>/pv
+// 仅对图片/视频生效，普通超链接不转（保留分享页）
+const cloudDirect = (u: string) => {
+  const m = String(u).match(/^https?:\/\/share\.jisu\.cn\/s\/([A-Za-z0-9]+)\/?$/i);
+  return m ? `https://share.jisu.cn/api/s/${m[1]}/pv` : u;
+};
 const isVideoUrl = (u: string) => /\.(mp4|webm|mov)(\?.*)?$/i.test(u);
 const mediaTag = (url: string, alt: string) => {
-  const u = safeUrl(url);
+  const u = safeUrl(cloudDirect(url));
   if (!u) return "";
   return isVideoUrl(u)
     ? `<video src="${u}" controls preload="metadata" playsinline></video>`
@@ -61,14 +67,15 @@ export function renderMarkdown(src: string): string {
   while (i < lines.length) {
     const line = lines[i];
     const imgLine = line.trim().match(/^!\[([^\]]*)\]\(([^)\s]+)\)$/);
-    if (imgLine && safeUrl(imgLine[2])) {
+    if (imgLine && safeUrl(cloudDirect(imgLine[2]))) {
       closeList();
+      const directUrl = cloudDirect(imgLine[2]);
       // 视频不进九宫格，单独成段渲染
-      if (isVideoUrl(imgLine[2])) {
+      if (isVideoUrl(directUrl)) {
         flushImgs();
-        out.push(`<div class="video-wrap">${mediaTag(imgLine[2], imgLine[1])}</div>`);
+        out.push(`<div class="video-wrap">${mediaTag(directUrl, imgLine[1])}</div>`);
       } else {
-        imgRun.push(`<img src="${imgLine[2]}" alt="${imgLine[1]}" loading="lazy"/>`);
+        imgRun.push(`<img src="${safeUrl(directUrl)}" alt="${imgLine[1]}" loading="lazy"/>`);
       }
       i++; continue;
     }
@@ -186,7 +193,7 @@ export function excerpt(content: string, n = 220): string {
 export function firstImage(content: string): string {
   const m = (content || "").match(/!\[[^\]]*\]\(([^)\s]+)\)/);
   if (!m) return "";
-  const u = m[1];
+  const u = cloudDirect(m[1]);
   return /^(https?:\/\/|\/uploads\/)/i.test(u) ? u : "";
 }
 
@@ -197,7 +204,8 @@ export function imagesOf(content: string): string[] {
   let m: RegExpExecArray | null;
   const src = content || "";
   while ((m = re.exec(src))) {
-    if (/^(https?:\/\/|\/uploads\/)/i.test(m[2]) && !isVideoUrl(m[2])) out.push(m[2]);
+    const u = cloudDirect(m[2]);
+    if (/^(https?:\/\/|\/uploads\/)/i.test(u) && !isVideoUrl(u)) out.push(u);
   }
   return out;
 }
