@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
 import { api, fmtTime, type NoteInfo, type SiteInfo, type UserInfo } from "./api";
-import { excerpt, imagesOf } from "./md";
+import { excerpt, imagesOf, renderMarkdownTextOnly } from "./md";
 import { isSameOriginUrl, proxyImageUrl } from "./poster-util";
 import { renderPoster, loadBitmap, type PosterAssets } from "./poster-canvas";
 
@@ -714,10 +714,14 @@ export function NoteCard({ note, onOpen, onComment, onTag }: {
   const imgs = imagesOf(note.content);
   const [lb, setLb] = useState<{ images: string[]; index: number } | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const pickTag = (e: { stopPropagation(): void }, t: string) => { e.stopPropagation(); onTag?.(t); };
+  const bodyHtml = renderMarkdownTextOnly(note.content);
+  // 内容较长时折叠：纯文本超 300 字或超 5 行则折叠，点击展开
+  const longBody = bodyHtml && ((note.content || "").length > 300 || (note.content || "").split(/\n/).length > 5);
   return (
     <>
-    <article className="note-card" onClick={() => onOpen(note)}>
+    <article className="note-card">
       <header>
         {note.author && <Avatar url={note.author.avatar} name={note.author.nickname} size={34} />}
         <div className="note-meta">
@@ -743,7 +747,16 @@ export function NoteCard({ note, onOpen, onComment, onTag }: {
         )}
       </header>
       {note.title && <h3>{note.title}</h3>}
-      {excerpt(note.content) && <p className="note-excerpt" dangerouslySetInnerHTML={{ __html: excerpt(note.content) }} />}
+      {bodyHtml && (
+        <div className={`note-body ${longBody && !expanded ? "folded" : ""}`}
+          dangerouslySetInnerHTML={{ __html: bodyHtml }} />
+      )}
+      {longBody && (
+        <button type="button" className="fold-toggle"
+          onClick={() => setExpanded(!expanded)}>
+          {expanded ? "收起" : "展开全文"}
+        </button>
+      )}
       {imgs.length > 0 && (
         <div className={`img-grid cols-${imgs.length === 1 ? 1 : imgs.length <= 4 ? 2 : 3}`}>
           {imgs.map((src, i) => (

@@ -122,6 +122,15 @@ export function renderMarkdown(src: string): string {
   return out.join("\n");
 }
 
+// 纯文本 Markdown 渲染（不含图片）：供列表卡片用，图片由卡片独立的九宫格 + 灯箱展示，避免重复。
+export function renderMarkdownTextOnly(src: string): string {
+  return renderMarkdown(src)
+    .replace(/<div class="img-grid[^"]*">[\s\S]*?<\/div>/g, "")
+    .replace(/<div class="video-wrap">[\s\S]*?<\/div>/g, "")
+    .replace(/<img[^>]*>/g, "")
+    .replace(/<video[\s\S]*?<\/video>/g, "");
+}
+
 // 摘要 HTML：合法颜色标记 [color=#RRGGBB]…[/color]（仅恰好 6 位 hex，与 renderMarkdown 同规则）
 // 转成 <span style="color:#hex"> 参与渲染；非法/未配对标记仍按旧口径剥除标记文本。
 // 截断按可见字符计量，颜色段作为整体保护——截断点若落在颜色段内部，

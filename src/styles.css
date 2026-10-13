@@ -244,6 +244,11 @@ a.drawer-nav-item:hover, button.drawer-nav-item:hover { background: var(--surfac
 .note-meta strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .note-card h3 { font-size: 18px; margin-top: 10px; overflow-wrap: anywhere; }
 .note-excerpt { color: var(--muted); margin-top: 6px; overflow-wrap: anywhere; }
+.note-body { margin-top: 6px; overflow-wrap: anywhere; }
+.note-body.folded { max-height: 108px; overflow: hidden; position: relative; }
+.note-body.folded::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 36px;
+  background: linear-gradient(transparent, var(--card)); pointer-events: none; }
+.fold-toggle { margin-top: 4px; background: none; border: none; color: var(--accent); font-size: 13px; cursor: pointer; padding: 2px 0; }
 .note-env { display: flex; gap: 12px; color: var(--muted); font-size: 13px; margin-top: 8px; flex-wrap: wrap; }
 .note-env .env-wx, .note-env .env-loc,
 .foot-env .env-wx, .foot-env .env-loc { display: inline-flex; align-items: center; gap: 4px; }
