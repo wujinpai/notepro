@@ -1234,7 +1234,7 @@ app.post("/api/sso/verify", rateLimit(30, 60_000, "sso-verify"), (req, res) => {
   if (!userId) return fail(res, 401, "授权码无效或已过期");
   const u = getUserById(userId);
   if (!u || u.status !== "active") return fail(res, 403, "账号不可用");
-  ok(res, { user: { id: u.id, username: u.username, nickname: u.nickname || u.username, role: u.role } });
+  ok(res, { user: { id: u.id, username: u.username, nickname: u.nickname || u.username, role: u.role, email: u.email || "" } });
 });
 app.get("/api/admin/sso", requireAdmin, (_req, res) => {
   const cfg = getSsoConfig();
