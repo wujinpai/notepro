@@ -56,6 +56,7 @@ export function plainExcerpt(content: string, n = 300): string {
     .replace(/```[\s\S]*?```/g, " ")
     .replace(/\[color=#[0-9a-fA-F]{6}\]([^\n]*?)\[\/color\]/g, "$1")
     .replace(/!\[[^\]]*\]\([^)]*\)/g, " ")
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
     .replace(/[#>*`\-]/g, "")
     .replace(/\s+/g, " ")
     .trim();
