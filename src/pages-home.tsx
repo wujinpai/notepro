@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, fmtTime, type CommentInfo, type NoteInfo, type SiteInfo, type UserInfo } from "./api";
 import { Avatar, Lightbox, LocationBadge, MoonIcon, NoteCard, PlaneIcon, ShareDialog, SunIcon, WeatherBadge, imageHit } from "./components";
-import { renderMarkdown } from "./md";
+import { renderMarkdown, renderMarkdownTextOnly } from "./md";
 
 export function Calendar({ month, days, selected, onMonth, onSelect }: {
   month: string; days: Record<string, number>; selected: string;
@@ -431,6 +431,7 @@ function CommentsSection({ note, user, focus, onAuthRequest }: {
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [emojiOpen, setEmojiOpen] = useState(false);
   const boxRef = useRef<HTMLElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
 
@@ -466,14 +467,38 @@ function CommentsSection({ note, user, focus, onAuthRequest }: {
   };
   const canDel = (c: CommentInfo) => !!user && (user.id === c.userId || user.id === note.userId || user.role === "admin");
 
+  // 表情包：在光标处插入
+  const insertEmoji = (emoji: string) => {
+    const ta = taRef.current;
+    if (!ta) { setText((t) => t + emoji); return; }
+    const start = ta.selectionStart ?? text.length;
+    const end = ta.selectionEnd ?? text.length;
+    const next = text.slice(0, start) + emoji + text.slice(end);
+    setText(next);
+    requestAnimationFrame(() => {
+      ta.focus();
+      ta.selectionStart = ta.selectionEnd = start + emoji.length;
+    });
+  };
+
   return (
     <section className="comments" ref={boxRef} aria-label="评论区">
       <h4>评论{comments.length > 0 ? ` · ${comments.length}` : ""}</h4>
       {user ? (
         <div className="comment-form">
-          <textarea ref={taRef} value={text} rows={3} maxLength={500} placeholder="写下你的评论…"
+          <textarea ref={taRef} value={text} rows={3} maxLength={500} placeholder="写下你的评论…（支持 Markdown）"
             onChange={(e) => setText(e.target.value)} />
+          {emojiOpen && (
+            <div className="emoji-panel">
+              {["😀","😁","😂","🤣","😊","😍","😘","😜","🤔","😴","😭","😡","👍","👎","👏","🙏","💪","🎉","❤️","💔","✨","🔥","👀","💯"].map((e) => (
+                <button key={e} type="button" className="emoji-btn" onClick={() => insertEmoji(e)}>{e}</button>
+              ))}
+            </div>
+          )}
           <div className="comment-form-row">
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setEmojiOpen(!emojiOpen)} title="表情">
+              😀
+            </button>
             <span className="muted tiny">{text.length}/500</span>
             {err && <span className="err-text">{err}</span>}
             <button type="button" className="btn btn-primary btn-sm" disabled={busy || !text.trim()} onClick={() => void submit()}>
@@ -498,7 +523,7 @@ function CommentsSection({ note, user, focus, onAuthRequest }: {
                     <span className="muted tiny">{fmtTime(c.createdAt)}</span>
                     {canDel(c) && <button type="button" className="text-btn comment-del" onClick={() => void del(c)}>删除</button>}
                   </div>
-                  <p className="comment-body">{c.content}</p>
+                  <p className="comment-body" dangerouslySetInnerHTML={{ __html: renderMarkdownTextOnly(c.content) }} />
                 </div>
               </div>
             ))}

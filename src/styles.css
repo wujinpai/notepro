@@ -316,6 +316,19 @@ a.drawer-nav-item:hover, button.drawer-nav-item:hover { background: var(--surfac
 .comment-form-row { display: flex; align-items: center; gap: 10px; margin-top: 8px; flex-wrap: wrap; }
 .comment-form-row .btn { margin-left: auto; }
 .comment-form-row .err-text { margin-top: 0; }
+.emoji-panel {
+  display: flex; flex-wrap: wrap; gap: 4px;
+  padding: 8px; margin-top: 8px;
+  border: 1px solid var(--border); border-radius: 8px;
+  background: var(--bg-soft, #fafafa);
+  max-height: 160px; overflow-y: auto;
+}
+.emoji-btn {
+  font-size: 22px; line-height: 1;
+  padding: 6px; border: none; background: transparent;
+  border-radius: 6px; cursor: pointer;
+}
+.emoji-btn:hover { background: rgba(0,0,0,0.06); }
 .comment-login-hint {
   display: flex; align-items: center; gap: 10px; border: 1px dashed var(--border);
   border-radius: var(--r-ctl); padding: 10px 12px; margin-bottom: 14px; flex-wrap: wrap;
