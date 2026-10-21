@@ -29,6 +29,10 @@ sudo mkdir -p /opt/apps/notepro/data /opt/apps/notepro/storage
 
 `data` 放 SQLite 数据库（`notepro.db`），`storage` 放上传的图片，两个目录都要映射成数据卷，容器重建数据才不丢。
 
+> ⚠️ **两个卷必须同时配齐（1Panel 用户必看）**：`/opt/apps/notepro/data → /app/data` 和 `/opt/apps/notepro/storage → /app/storage`，都要选「本机目录」。
+> Dockerfile 里有 `VOLUME` 声明，漏配任何一个都不会报错——Docker 会静默建一个匿名卷顶上。症状：图片能上传、宿主机目录里文件也在，但网站上全 404（容器读的是匿名卷，够不着宿主机的文件）。
+> 在 1Panel 容器编辑页确认两个挂载都是 `bind` 类型；验证命令：`docker exec notepro ls /app/storage/images | wc -l` 与宿主机 `ls /opt/apps/notepro/storage/images | wc -l` 数量一致才算对。
+
 **第 2 步：写 `.env`（`SESSION_SECRET` 必填）**
 
 ```bash
