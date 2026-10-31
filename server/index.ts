@@ -677,6 +677,11 @@ const cleanupOrphanedImages = (paths: string[], excludeNoteId?: number) => {
       const args = excludeNoteId === undefined ? [like] : [excludeNoteId, like];
       const ref = (db.prepare(sql).get(...args) as { c: number }).c;
       if (ref > 0) continue; // 仍被其他笔记引用，保留
+      // 头像与站点 Logo 也算引用：用户头像(users.avatar)、站点 Logo(settings.site_logo)
+      // 的文件若曾被写进某篇笔记正文，删笔记时不能跟着删，否则头像/Logo 会莫名丢失
+      const usedAsAvatar = (db.prepare("SELECT COUNT(*) c FROM users WHERE avatar=?").get(p) as { c: number }).c;
+      if (usedAsAvatar > 0) continue;
+      if (getSetting("site_logo", "") === p) continue;
       try { unlinkSync(join(STORAGE_DIR, p.replace("/uploads/", ""))); } catch { /* 文件已不存在 */ }
       db.prepare("DELETE FROM media WHERE path=?").run(p);
     } catch { /* 清理失败不影响主流程 */ }
